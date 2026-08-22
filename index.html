@@ -304,6 +304,43 @@
   .empty-state{ text-align:center; color: var(--shell-text-dim); font-size:14px; padding: 30px 10px; line-height:1.6; }
   .summary-actions{ display:flex; gap:10px; margin: 22px 0 4px; }
   .hint-text{ text-align:center; color: var(--shell-text-dim); font-size:12px; margin-top:10px; }
+  .visually-hidden{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
+  .btn-full{ width:100%; margin-top:20px; }
+
+  /* ---- Period tabs (Summary) ---- */
+  .period-tabs{ display:flex; gap:6px; margin: 4px 0 2px; overflow-x:auto; }
+  .period-tab{
+    flex-shrink:0; padding:7px 14px; border-radius:999px; background: var(--shell-bg-soft);
+    border:1px solid var(--shell-border); color: var(--shell-text-dim); font-size:13px; font-weight:700;
+  }
+  .period-tab.active{ background: var(--chili); border-color: var(--chili); color: var(--paper); }
+
+  /* ---- Daily breakdown bars (Week/Month/All) ---- */
+  .day-row{ display:flex; align-items:center; gap:10px; padding:8px 0; }
+  .day-row .day-label{ width:58px; flex-shrink:0; font-size:12px; color: var(--shell-text-dim); font-family: var(--font-mono); }
+  .day-row .day-bar-track{ flex:1; height:10px; background: var(--shell-bg-soft); border-radius:5px; overflow:hidden; }
+  .day-row .day-bar-fill{ height:100%; background: var(--chili); border-radius:5px; }
+  .day-row .day-amt{ width:64px; flex-shrink:0; text-align:right; font-family: var(--font-mono); font-size:12px; font-weight:700; }
+
+  /* ---- Menu editor ---- */
+  .menu-edit-intro{ font-size:13px; color: var(--shell-text-dim); line-height:1.5; margin-bottom:18px; }
+  .menu-edit-cat{ background: var(--paper); color: var(--ink); border-radius: var(--radius); box-shadow: var(--card-shadow); padding:14px 16px; margin-bottom:14px; }
+  .menu-edit-cat-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+  .menu-edit-cat-title{ font-size:12px; letter-spacing:.1em; text-transform:uppercase; font-weight:800; color: var(--accent-gold); }
+  .menu-edit-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px dashed var(--line); }
+  .menu-edit-row:last-of-type{ border-bottom:none; }
+  .menu-edit-row .mi-name{ flex:1; font-size:14px; font-weight:600; }
+  .menu-edit-row .mi-price{ font-family: var(--font-mono); font-size:14px; color: var(--text-soft); }
+  .mi-delete{
+    width:24px; height:24px; border-radius:50%; border:none; flex-shrink:0;
+    background: rgba(30,27,24,0.08); color: var(--text-soft); font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .mi-delete:active{ background: var(--chili); color: var(--paper); }
+  .menu-edit-add{
+    width:100%; text-align:left; margin-top:8px; padding:9px 0; background:none; border:none;
+    color: var(--chili); font-size:13px; font-weight:700;
+  }
 
   @media (min-width: 700px){
     .grid-tables{ grid-template-columns: repeat(4, 1fr); }
@@ -350,39 +387,40 @@
 <body>
 <div id="app"></div>
 <div id="print-report" class="print-only"></div>
+<input type="file" id="import-file-input" accept="application/json,.json" class="visually-hidden">
 
 <script>
 (function(){
   "use strict";
 
   var STORAGE_KEY = "order_board_streetfood_v1";
-  var MENU = [
-    { cat: "Pares", items: [
-      { name: "Pares", price: 60 },
-      { name: "Pares w/ Rice", price: 75 },
-      { name: "Pares w/ Egg", price: 75 },
-      { name: "Pares w/ Egg & Rice", price: 90 }
+  var DEFAULT_MENU = [
+    { id:1, cat: "Pares", items: [
+      { id:1, name: "Pares", price: 60 },
+      { id:2, name: "Pares w/ Rice", price: 75 },
+      { id:3, name: "Pares w/ Egg", price: 75 },
+      { id:4, name: "Pares w/ Egg & Rice", price: 90 }
     ]},
-    { cat: "Mami", items: [
-      { name: "Mami", price: 50 },
-      { name: "Mami w/ Rice", price: 65 },
-      { name: "Mami w/ Egg", price: 65 },
-      { name: "Mami w/ Egg & Rice", price: 90 }
+    { id:2, cat: "Mami", items: [
+      { id:5, name: "Mami", price: 50 },
+      { id:6, name: "Mami w/ Rice", price: 65 },
+      { id:7, name: "Mami w/ Egg", price: 65 },
+      { id:8, name: "Mami w/ Egg & Rice", price: 90 }
     ]},
-    { cat: "Pastil", items: [
-      { name: "Pastil", price: 50 },
-      { name: "Pastil w/ Egg", price: 65 }
+    { id:3, cat: "Pastil", items: [
+      { id:9, name: "Pastil", price: 50 },
+      { id:10, name: "Pastil w/ Egg", price: 65 }
     ]},
-    { cat: "Siomai", items: [
-      { name: "Siomai", price: 25 }
+    { id:4, cat: "Siomai", items: [
+      { id:11, name: "Siomai", price: 25 }
     ]},
-    { cat: "Drinks", items: [
-      { name: "Softdrinks", price: 25 },
-      { name: "Water", price: 20 }
+    { id:5, cat: "Drinks", items: [
+      { id:12, name: "Softdrinks", price: 25 },
+      { id:13, name: "Water", price: 20 }
     ]},
-    { cat: "Add-ons", items: [
-      { name: "Rice", price: 15 },
-      { name: "Egg", price: 15 }
+    { id:6, cat: "Add-ons", items: [
+      { id:14, name: "Rice", price: 15 },
+      { id:15, name: "Egg", price: 15 }
     ]}
   ];
   var DEFAULT_TABLES = [
@@ -406,7 +444,11 @@
     }catch(e){ storageWorks = false; }
   }
   function persistable(){
-    return { tables: state.tables, history: state.history, theme: state.theme, tableList: state.tableList, nextCustomId: state.nextCustomId };
+    return {
+      tables: state.tables, history: state.history, theme: state.theme,
+      tableList: state.tableList, nextCustomId: state.nextCustomId,
+      menu: state.menu, nextMenuCatId: state.nextMenuCatId, nextMenuItemId: state.nextMenuItemId
+    };
   }
   // Older saved data stored each table as a flat item array. Newer format stores
   // each table as an array of "splits", each holding its own item array, so a
@@ -433,11 +475,16 @@
     sheetOpen: false,
     modal: null,
     cashInput: "",
+    summaryPeriod: "today",
+    editingCat: null,
     theme: (loaded && loaded.theme) || "dark",
     tableList: (loaded && loaded.tableList) || DEFAULT_TABLES.slice(),
     nextCustomId: (loaded && loaded.nextCustomId) || 5,
     tables: migrateTables((loaded && loaded.tables) || { "1":[], "2":[], "3":[], "4":[] }),
-    history: (loaded && loaded.history) || []
+    history: (loaded && loaded.history) || [],
+    menu: (loaded && loaded.menu) || JSON.parse(JSON.stringify(DEFAULT_MENU)),
+    nextMenuCatId: (loaded && loaded.nextMenuCatId) || 7,
+    nextMenuItemId: (loaded && loaded.nextMenuItemId) || 16
   };
   document.body.classList.toggle("theme-light", state.theme === "light");
 
@@ -478,6 +525,48 @@
     return h + ":" + (m<10?"0":"")+m + " " + ampm;
   }
   function pad2(n){ return (n<10?"0":"")+n; }
+
+  function startOfWeek(d){
+    var day = d.getDay();
+    var diff = (day === 0 ? -6 : 1) - day;
+    var monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff);
+    monday.setHours(0,0,0,0);
+    return monday;
+  }
+  function startOfMonth(d){
+    var m = new Date(d.getFullYear(), d.getMonth(), 1);
+    m.setHours(0,0,0,0);
+    return m;
+  }
+  function periodHistory(period){
+    if(period === "today") return todaysHistory();
+    if(period === "all") return state.history.slice();
+    var now = new Date();
+    var start = period === "week" ? startOfWeek(now) : startOfMonth(now);
+    return state.history.filter(function(h){ return new Date(h.ts) >= start; });
+  }
+  function periodLabel(period){
+    if(period === "today") return "Today\u2019s";
+    if(period === "week") return "This Week\u2019s";
+    if(period === "month") return "This Month\u2019s";
+    return "All-Time";
+  }
+  function groupByDay(txns){
+    var map = {};
+    txns.forEach(function(h){
+      var d = new Date(h.ts);
+      var key = d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
+      if(!map[key]) map[key] = { key:key, date:d, total:0, orders:0 };
+      map[key].total += h.total;
+      map[key].orders += 1;
+    });
+    return Object.keys(map).sort().reverse().map(function(k){ return map[k]; });
+  }
+  function fmtDayLabel(d){
+    var days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return days[d.getDay()] + " " + months[d.getMonth()] + " " + d.getDate();
+  }
 
   function navigate(view, opts){
     state.view = view;
@@ -624,6 +713,117 @@
     render();
   }
 
+  // ---------- menu editor ----------
+  function openMenuEditor(){ state.view = "menu"; state.modal = null; render(); window.scrollTo(0,0); }
+  function closeMenuEditor(){ state.view = "tables"; render(); window.scrollTo(0,0); }
+
+  function openAddCategoryForm(){ state.modal = { type:"add-category" }; render(); }
+  function submitAddCategory(){
+    var nameEl = document.getElementById("ac-name");
+    var name = (nameEl.value || "").trim();
+    if(!name) return;
+    state.menu.push({ id: state.nextMenuCatId++, cat: name.slice(0,24), items: [] });
+    state.modal = null;
+    persist();
+    render();
+  }
+  function deleteMenuCategory(catId){
+    var cat = state.menu.find(function(c){ return c.id === catId; });
+    if(!cat || cat.items.length) return;
+    state.menu = state.menu.filter(function(c){ return c.id !== catId; });
+    persist();
+    render();
+  }
+
+  function openItemForm(catId, itemId){
+    state.modal = { type:"menu-item-form", catId: catId, itemId: itemId || null };
+    render();
+  }
+  function submitItemForm(){
+    var m = state.modal;
+    if(!m) return;
+    var nameEl = document.getElementById("mi-name");
+    var priceEl = document.getElementById("mi-price");
+    var name = (nameEl.value || "").trim();
+    var price = parseFloat(priceEl.value);
+    if(!name || isNaN(price) || price < 0) return;
+    var cat = state.menu.find(function(c){ return c.id === m.catId; });
+    if(!cat) return;
+    if(m.itemId){
+      var it = cat.items.find(function(i){ return i.id === m.itemId; });
+      if(it){ it.name = name.slice(0,40); it.price = price; }
+    } else {
+      cat.items.push({ id: state.nextMenuItemId++, name: name.slice(0,40), price: price });
+    }
+    state.modal = null;
+    persist();
+    render();
+  }
+  function deleteMenuItem(catId, itemId){
+    var cat = state.menu.find(function(c){ return c.id === catId; });
+    if(!cat) return;
+    cat.items = cat.items.filter(function(i){ return i.id !== itemId; });
+    state.modal = null;
+    persist();
+    render();
+  }
+
+  // ---------- full backup / restore ----------
+  function exportAllData(){
+    var now = new Date();
+    var dateStr = now.getFullYear() + "-" + pad2(now.getMonth()+1) + "-" + pad2(now.getDate());
+    var backup = persistable();
+    backup._backupType = "order-board-full-backup";
+    backup._exportedAt = now.toISOString();
+    var blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "order_board_backup_" + dateStr + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }
+  function triggerImportFile(){
+    var input = document.getElementById("import-file-input");
+    if(input) input.click();
+  }
+  function handleImportFile(fileInput){
+    var file = fileInput.files && fileInput.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var parsed;
+      try{ parsed = JSON.parse(reader.result); }
+      catch(e){ state.modal = { type:"import-error" }; render(); return; }
+      if(!parsed || typeof parsed !== "object" || !("tables" in parsed) || !("history" in parsed)){
+        state.modal = { type:"import-error" }; render(); return;
+      }
+      state.modal = { type:"confirm-restore", pending: parsed };
+      render();
+    };
+    reader.onerror = function(){ state.modal = { type:"import-error" }; render(); };
+    reader.readAsText(file);
+    fileInput.value = "";
+  }
+  function confirmRestoreBackup(){
+    var data = state.modal && state.modal.pending;
+    if(!data) return;
+    state.tables = migrateTables(data.tables || {});
+    state.history = data.history || [];
+    state.theme = data.theme || "dark";
+    state.tableList = data.tableList || DEFAULT_TABLES.slice();
+    state.nextCustomId = data.nextCustomId || 5;
+    state.menu = data.menu || JSON.parse(JSON.stringify(DEFAULT_MENU));
+    state.nextMenuCatId = data.nextMenuCatId || 7;
+    state.nextMenuItemId = data.nextMenuItemId || 16;
+    state.modal = null;
+    document.body.classList.toggle("theme-light", state.theme === "light");
+    persist();
+    navigate("tables");
+  }
+
   function computeDaySummary(txns){
     var total = txns.reduce(function(s,h){ return s+h.total; }, 0);
     var orders = txns.length;
@@ -657,15 +857,17 @@
   }
 
   function exportCSV(){
-    var todays = todaysHistory();
-    if(!todays.length) return;
-    var summary = computeDaySummary(todays);
+    var period = state.summaryPeriod;
+    var txns = periodHistory(period);
+    if(!txns.length) return;
+    var summary = computeDaySummary(txns);
     var now = new Date();
     var dateStr = now.getFullYear() + "-" + pad2(now.getMonth()+1) + "-" + pad2(now.getDate());
+    var titleWord = period === "today" ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : "All-Time";
 
     var rows = [];
-    rows.push(["Order Board - Daily Sales Report"]);
-    rows.push(["Date", dateStr]);
+    rows.push(["Order Board - " + titleWord + " Sales Report"]);
+    rows.push(["Generated", dateStr]);
     rows.push([]);
     rows.push(["SUMMARY"]);
     rows.push(["Total Earnings (PHP)", summary.total]);
@@ -676,12 +878,20 @@
     rows.push(["Item", "Qty Sold", "Revenue (PHP)"]);
     summary.best.forEach(function(b){ rows.push([b.name, b.qty, b.revenue]); });
     rows.push([]);
-    rows.push(["TRANSACTIONS"]);
-    rows.push(["Time", "Table", "Items", "Total (PHP)"]);
-    summary.txns.forEach(function(h){
-      var itemsStr = h.items.map(function(i){ return i.qty + "x " + i.name; }).join("; ");
-      rows.push([fmtTime(h.ts), "Table " + h.table, itemsStr, h.total]);
-    });
+    if(period === "today"){
+      rows.push(["TRANSACTIONS"]);
+      rows.push(["Time", "Table", "Items", "Total (PHP)"]);
+      summary.txns.forEach(function(h){
+        var itemsStr = h.items.map(function(i){ return i.qty + "x " + i.name; }).join("; ");
+        rows.push([fmtTime(h.ts), "Table " + h.table, itemsStr, h.total]);
+      });
+    } else {
+      rows.push(["DAILY BREAKDOWN"]);
+      rows.push(["Date", "Orders", "Total (PHP)"]);
+      groupByDay(txns).forEach(function(day){
+        rows.push([fmtDayLabel(day.date), day.orders, day.total]);
+      });
+    }
     rows.push(["", "", "TOTAL", summary.total]);
 
     var csv = rows.map(function(r){
@@ -691,7 +901,7 @@
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
-    a.download = "streetfood_daily_report_" + dateStr + ".csv";
+    a.download = "streetfood_" + period + "_report_" + dateStr + ".csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -699,12 +909,14 @@
   }
 
   function exportPDF(){
-    var todays = todaysHistory();
-    if(!todays.length) return;
-    var summary = computeDaySummary(todays);
+    var period = state.summaryPeriod;
+    var txns = periodHistory(period);
+    if(!txns.length) return;
+    var summary = computeDaySummary(txns);
     var now = new Date();
     var dateStr = now.toLocaleDateString(undefined, { year:"numeric", month:"long", day:"numeric" });
     var genStr = now.toLocaleString(undefined, { hour:"numeric", minute:"2-digit" });
+    var titleWord = period === "today" ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : "All-Time";
 
     var bestRows = summary.best.length
       ? summary.best.map(function(b,i){
@@ -712,14 +924,25 @@
         }).join("")
       : '<tr><td colspan="4" style="text-align:center;color:#9a9187;">No sales recorded</td></tr>';
 
-    var txnRows = summary.txns.map(function(h){
-      var itemsStr = h.items.map(function(i){ return i.qty + "x " + escapeHtml(i.name); }).join(", ");
-      return '<tr><td>' + fmtTime(h.ts) + '</td><td>Table ' + h.table + '</td><td>' + itemsStr + '</td><td class="num">' + peso(h.total) + '</td></tr>';
-    }).join("");
+    var detailTitle, detailTable;
+    if(period === "today"){
+      var txnRows = summary.txns.map(function(h){
+        var itemsStr = h.items.map(function(i){ return i.qty + "x " + escapeHtml(i.name); }).join(", ");
+        return '<tr><td>' + fmtTime(h.ts) + '</td><td>Table ' + h.table + '</td><td>' + itemsStr + '</td><td class="num">' + peso(h.total) + '</td></tr>';
+      }).join("");
+      detailTitle = "Transactions";
+      detailTable = '<table class="pr-table"><thead><tr><th>Time</th><th>Table</th><th>Items</th><th class="num">Total</th></tr></thead><tbody>' + txnRows + '</tbody></table>';
+    } else {
+      var dayRows = groupByDay(txns).map(function(day){
+        return '<tr><td>' + fmtDayLabel(day.date) + '</td><td class="num">' + day.orders + '</td><td class="num">' + peso(day.total) + '</td></tr>';
+      }).join("");
+      detailTitle = "Daily Breakdown";
+      detailTable = '<table class="pr-table"><thead><tr><th>Date</th><th class="num">Orders</th><th class="num">Total</th></tr></thead><tbody>' + dayRows + '</tbody></table>';
+    }
 
     var reportHtml =
       '<div class="pr-header">' +
-        '<div class="pr-brand">Daily Sales Report</div>' +
+        '<div class="pr-brand">' + titleWord + ' Sales Report</div>' +
         '<div class="pr-date">' + dateStr + '</div>' +
       '</div>' +
       '<div class="pr-stats">' +
@@ -729,11 +952,8 @@
       '</div>' +
       '<div class="pr-section-title">Best Sellers</div>' +
       '<table class="pr-table"><thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th class="num">Revenue</th></tr></thead><tbody>' + bestRows + '</tbody></table>' +
-      '<div class="pr-section-title">Transactions</div>' +
-      '<table class="pr-table"><thead><tr><th>Time</th><th>Table</th><th>Items</th><th class="num">Total</th></tr></thead><tbody>' +
-        txnRows +
-        '<tr class="pr-total-row"><td colspan="3">TOTAL</td><td class="num">' + peso(summary.total) + '</td></tr>' +
-      '</tbody></table>' +
+      '<div class="pr-section-title">' + detailTitle + '</div>' +
+      detailTable +
       '<div class="pr-footer">Generated ' + genStr + ' &middot; Order Board</div>';
 
     document.getElementById("print-report").innerHTML = reportHtml;
@@ -777,10 +997,44 @@
     return (
       '<div class="topbar"><div class="topbar-row">' +
         '<div class="brand"><div class="kicker">Street Food</div><h1>Order Board</h1></div>' +
-        '<div class="topbar-actions">' + renderThemeToggle() + '<div class="today-chip">Today ' + peso(todayTotal) + '</div></div>' +
+        '<div class="topbar-actions">' + renderThemeToggle() + '<button class="theme-toggle" data-act="open-menu-editor" aria-label="Edit menu">\u270E</button><div class="today-chip">Today ' + peso(todayTotal) + '</div></div>' +
       '</div></div>' +
       '<main><div class="grid-tables">' + cards + '</div></main>' +
       renderNav("tables") +
+      renderModal()
+    );
+  }
+
+  function renderMenuScreen(){
+    var catsHtml = state.menu.map(function(cat){
+      var itemsHtml = cat.items.map(function(it){
+        return '<div class="menu-edit-row">' +
+          '<div class="mi-name" data-act="edit-menu-item" data-cat="' + cat.id + '" data-item="' + it.id + '">' + escapeHtml(it.name) + '</div>' +
+          '<div class="mi-price">' + peso(it.price) + '</div>' +
+          '<button class="mi-delete" data-act="delete-menu-item" data-cat="' + cat.id + '" data-item="' + it.id + '" aria-label="Delete item">\u00d7</button>' +
+        '</div>';
+      }).join("");
+      var canDeleteCat = cat.items.length === 0;
+      return '<div class="menu-edit-cat">' +
+        '<div class="menu-edit-cat-head">' +
+          '<div class="menu-edit-cat-title">' + escapeHtml(cat.cat) + '</div>' +
+          (canDeleteCat ? '<button class="mi-delete" data-act="delete-menu-cat" data-cat="' + cat.id + '" aria-label="Delete category">\u00d7</button>' : '') +
+        '</div>' +
+        itemsHtml +
+        '<button class="menu-edit-add" data-act="add-menu-item" data-cat="' + cat.id + '">+ Add item to ' + escapeHtml(cat.cat) + '</button>' +
+      '</div>';
+    }).join("");
+
+    return (
+      '<div class="topbar"><div class="topbar-row">' +
+        '<button class="back-btn" data-act="close-menu-editor"><span class="arrow">‹</span> Tables</button>' +
+        '<div class="topbar-actions">' + renderThemeToggle() + '</div>' +
+      '</div></div>' +
+      '<main>' +
+        '<div class="menu-edit-intro">Edit prices, add items, or create new categories. Changes apply immediately on the order screen.</div>' +
+        catsHtml +
+        '<button class="btn btn-outline-shell btn-full" data-act="open-add-category">+ Add Category</button>' +
+      '</main>' +
       renderModal()
     );
   }
@@ -795,7 +1049,7 @@
     var activeTotal = splitTotal(activeSplitObj);
     var activeCount = splitCount(activeSplitObj);
 
-    var menuHtml = MENU.map(function(group){
+    var menuHtml = state.menu.map(function(group){
       var tiles = group.items.map(function(it){
         return '<button class="menu-tile" data-act="add-item" data-table="' + id + '" data-name="' + escapeHtml(it.name) + '" data-price="' + it.price + '">' +
           '<div class="name">' + escapeHtml(it.name) + '</div><div class="price">' + peso(it.price) + '</div></button>';
@@ -889,27 +1143,50 @@
   }
 
   function renderSummaryScreen(){
-    var todaysAsc = todaysHistory();
-    var summary = computeDaySummary(todaysAsc);
-    var txnsDesc = todaysAsc.slice().reverse();
+    var period = state.summaryPeriod;
+    var txns = periodHistory(period);
+    var summary = computeDaySummary(txns);
     var best = summary.best.slice(0,5);
 
     var bestHtml = best.length
       ? best.map(function(b,i){
           return '<div class="best-row"><div class="rank">' + (i+1) + '</div><div class="n">' + escapeHtml(b.name) + '</div><div class="q">×' + b.qty + '</div></div>';
         }).join("")
-      : '<div class="empty-state">No sales yet today.<br>Mark a table as paid to see it here.</div>';
+      : '<div class="empty-state">No sales in this period yet.</div>';
 
-    var txnHtml = txnsDesc.length
-      ? txnsDesc.map(function(h){
-          return '<div class="txn-row"><div class="time">' + fmtTime(h.ts) + '</div>' +
-            '<div class="desc"><b>Table ' + h.table + '</b> · ' + h.items.reduce(function(s,i){return s+i.qty;},0) + ' items</div>' +
-            '<div class="amt">' + peso(h.total) + '</div></div>';
-        }).join("")
-      : "";
+    var detailHtml;
+    if(period === "today"){
+      var txnsDesc = txns.slice().reverse();
+      detailHtml = txnsDesc.length
+        ? '<div class="cat-label">Transactions</div><div>' + txnsDesc.map(function(h){
+            return '<div class="txn-row"><div class="time">' + fmtTime(h.ts) + '</div>' +
+              '<div class="desc"><b>Table ' + h.table + '</b> · ' + h.items.reduce(function(s,i){return s+i.qty;},0) + ' items</div>' +
+              '<div class="amt">' + peso(h.total) + '</div></div>';
+          }).join("") + '</div>'
+        : "";
+    } else {
+      var days = groupByDay(txns);
+      var maxDay = days.reduce(function(m,d){ return Math.max(m, d.total); }, 1);
+      detailHtml = days.length
+        ? '<div class="cat-label">Daily Breakdown</div><div>' + days.map(function(d){
+            var pct = Math.round((d.total / maxDay) * 100);
+            return '<div class="day-row">' +
+              '<div class="day-label">' + fmtDayLabel(d.date) + '</div>' +
+              '<div class="day-bar-track"><div class="day-bar-fill" style="width:' + pct + '%"></div></div>' +
+              '<div class="day-amt">' + peso(d.total) + '</div>' +
+            '</div>';
+          }).join("") + '</div>'
+        : "";
+    }
 
     var total = summary.total, orders = summary.orders, itemsSold = summary.itemsSold;
     var hasHistory = orders > 0;
+    var hasTodayHistory = todaysHistory().length > 0;
+
+    var periods = [["today","Today"],["week","Week"],["month","Month"],["all","All Time"]];
+    var periodTabsHtml = '<div class="period-tabs">' + periods.map(function(p){
+      return '<button class="period-tab ' + (period===p[0]?"active":"") + '" data-act="set-period" data-period="' + p[0] + '">' + p[1] + '</button>';
+    }).join("") + '</div>';
 
     return (
       '<div class="topbar"><div class="topbar-row">' +
@@ -917,20 +1194,27 @@
         '<div class="topbar-actions">' + renderThemeToggle() + '</div>' +
       '</div></div>' +
       '<main>' +
-        '<div class="summary-hero"><div class="label">Today\u2019s Earnings</div><div class="value">' + peso(total) + '</div></div>' +
+        periodTabsHtml +
+        '<div class="summary-hero"><div class="label">' + periodLabel(period) + ' Earnings</div><div class="value">' + peso(total) + '</div></div>' +
         '<div class="stat-row">' +
           '<div class="stat-box"><div class="n">' + orders + '</div><div class="l">Orders</div></div>' +
           '<div class="stat-box"><div class="n">' + itemsSold + '</div><div class="l">Items Sold</div></div>' +
         '</div>' +
         '<div class="cat-label">Best Sellers</div>' +
         '<div class="best-list">' + bestHtml + '</div>' +
-        (txnsDesc.length ? '<div class="cat-label">Transactions</div><div>' + txnHtml + '</div>' : '') +
-        '<div class="cat-label">Data</div>' +
+        detailHtml +
+        '<div class="cat-label">Reports</div>' +
         '<div class="summary-actions">' +
           '<button class="btn btn-export" data-act="open-export" ' + (hasHistory?'':'disabled') + '>Export</button>' +
-          '<button class="btn btn-outline-shell" data-act="ask-reset" ' + (hasHistory?'':'disabled') + '>Reset Today</button>' +
+          '<button class="btn btn-outline-shell" data-act="ask-reset" ' + (hasTodayHistory?'':'disabled') + '>Reset Today</button>' +
         '</div>' +
-        (hasHistory ? '' : '<div class="hint-text">No sales recorded yet today — nothing to export or reset.</div>') +
+        (hasHistory ? '' : '<div class="hint-text">No sales recorded in this period — nothing to export.</div>') +
+        '<div class="cat-label">Backup</div>' +
+        '<div class="summary-actions">' +
+          '<button class="btn btn-outline-shell" data-act="export-all-data">Export All Data</button>' +
+          '<button class="btn btn-outline-shell" data-act="trigger-import">Import Backup</button>' +
+        '</div>' +
+        '<div class="hint-text">Full backup of every table, sale, and menu item — separate from the reports above. Keep a copy off your phone.</div>' +
       '</main>' +
       renderNav("summary") +
       renderModal()
@@ -1015,9 +1299,10 @@
         '</div></div>';
     }
     if(state.modal.type === "export-menu"){
+      var expLabel = periodLabel(state.summaryPeriod);
       return '<div class="modal-backdrop" data-act="modal-backdrop">' +
         '<div class="modal-card">' +
-          '<h3>Export Today\u2019s Report</h3>' +
+          '<h3>Export ' + expLabel + ' Report</h3>' +
           '<p>Choose a format.</p>' +
           '<div class="export-options">' +
             '<button class="export-option" data-act="do-export-csv">' +
@@ -1032,6 +1317,57 @@
           '</div>' +
         '</div></div>';
     }
+    if(state.modal.type === "add-category"){
+      return '<div class="modal-backdrop" data-act="modal-backdrop">' +
+        '<div class="modal-card">' +
+          '<h3>Add a category</h3>' +
+          '<div class="custom-form">' +
+            '<div><label for="ac-name">Category name</label><input id="ac-name" type="text" placeholder="e.g. Rice Meals" autofocus maxlength="24"></div>' +
+          '</div>' +
+          '<div class="modal-actions">' +
+            '<button class="btn btn-secondary" data-act="close-modal">Cancel</button>' +
+            '<button class="btn btn-primary" data-act="submit-add-category">Add</button>' +
+          '</div>' +
+        '</div></div>';
+    }
+    if(state.modal.type === "menu-item-form"){
+      var m = state.modal;
+      var cat = state.menu.find(function(c){ return c.id === m.catId; });
+      var editing = m.itemId ? cat.items.find(function(i){ return i.id === m.itemId; }) : null;
+      return '<div class="modal-backdrop" data-act="modal-backdrop">' +
+        '<div class="modal-card">' +
+          '<h3>' + (editing ? "Edit item" : "Add item") + (cat ? (" \u2014 " + escapeHtml(cat.cat)) : "") + '</h3>' +
+          '<div class="custom-form">' +
+            '<div><label for="mi-name">Item name</label><input id="mi-name" type="text" placeholder="e.g. Pares w/ Sisig" autofocus value="' + (editing ? escapeHtml(editing.name) : "") + '"></div>' +
+            '<div><label for="mi-price">Price (\u20B1)</label><input id="mi-price" type="number" inputmode="decimal" min="0" placeholder="0" value="' + (editing ? editing.price : "") + '"></div>' +
+          '</div>' +
+          '<div class="modal-actions">' +
+            (editing ? '<button class="btn btn-secondary" data-act="delete-menu-item" data-cat="' + m.catId + '" data-item="' + m.itemId + '">Delete</button>' : '<button class="btn btn-secondary" data-act="close-modal">Cancel</button>') +
+            '<button class="btn btn-primary" data-act="submit-item-form">Save</button>' +
+          '</div>' +
+        '</div></div>';
+    }
+    if(state.modal.type === "confirm-restore"){
+      return '<div class="modal-backdrop" data-act="modal-backdrop">' +
+        '<div class="modal-card">' +
+          '<h3>Restore this backup?</h3>' +
+          '<p>This replaces everything currently on this device \u2014 all tables, sales history, and your menu \u2014 with what\u2019s in the backup file. This can\u2019t be undone.</p>' +
+          '<div class="modal-actions">' +
+            '<button class="btn btn-secondary" data-act="close-modal">Cancel</button>' +
+            '<button class="btn btn-primary" data-act="confirm-restore">Restore</button>' +
+          '</div>' +
+        '</div></div>';
+    }
+    if(state.modal.type === "import-error"){
+      return '<div class="modal-backdrop" data-act="modal-backdrop">' +
+        '<div class="modal-card">' +
+          '<h3>Couldn\u2019t read that file</h3>' +
+          '<p>This doesn\u2019t look like an Order Board backup file. Make sure you\u2019re selecting a file downloaded from "Export All Data."</p>' +
+          '<div class="modal-actions">' +
+            '<button class="btn btn-primary" data-act="close-modal">OK</button>' +
+          '</div>' +
+        '</div></div>';
+    }
     return "";
   }
 
@@ -1040,6 +1376,7 @@
     var html;
     if(state.view === "order" && state.activeTable) html = renderOrderScreen();
     else if(state.view === "summary") html = renderSummaryScreen();
+    else if(state.view === "menu") html = renderMenuScreen();
     else html = renderTablesScreen();
     app.innerHTML = html;
     applyKeyboardOffset();
@@ -1107,9 +1444,22 @@
     else if(act === "submit-custom") submitCustomItem(parseInt(t,10));
     else if(act === "ask-reset") askResetAll();
     else if(act === "confirm-reset") confirmResetAll();
-    else if(act === "open-export"){ if(todaysHistory().length){ state.modal = { type:"export-menu" }; render(); } }
+    else if(act === "set-period"){ state.summaryPeriod = el.getAttribute("data-period"); render(); }
+    else if(act === "open-export"){ if(periodHistory(state.summaryPeriod).length){ state.modal = { type:"export-menu" }; render(); } }
     else if(act === "do-export-csv"){ closeModal(); exportCSV(); }
     else if(act === "do-export-pdf"){ closeModal(); exportPDF(); }
+    else if(act === "open-menu-editor") openMenuEditor();
+    else if(act === "close-menu-editor") closeMenuEditor();
+    else if(act === "open-add-category") openAddCategoryForm();
+    else if(act === "submit-add-category") submitAddCategory();
+    else if(act === "delete-menu-cat") deleteMenuCategory(parseInt(el.getAttribute("data-cat"),10));
+    else if(act === "add-menu-item") openItemForm(parseInt(el.getAttribute("data-cat"),10));
+    else if(act === "edit-menu-item") openItemForm(parseInt(el.getAttribute("data-cat"),10), parseInt(el.getAttribute("data-item"),10));
+    else if(act === "delete-menu-item") deleteMenuItem(parseInt(el.getAttribute("data-cat"),10), parseInt(el.getAttribute("data-item"),10));
+    else if(act === "submit-item-form") submitItemForm();
+    else if(act === "export-all-data") exportAllData();
+    else if(act === "trigger-import") triggerImportFile();
+    else if(act === "confirm-restore") confirmRestoreBackup();
     else if(act === "modal-backdrop"){ if(ev.target === el) closeModal(); }
   });
 
@@ -1135,6 +1485,10 @@
       displayEl.textContent = "Change " + peso(change);
       displayEl.className = "change-display ok";
     }
+  });
+
+  document.getElementById("import-file-input").addEventListener("change", function(ev){
+    handleImportFile(ev.target);
   });
 
   render();
