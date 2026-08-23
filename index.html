@@ -324,8 +324,9 @@
 
   /* ---- Menu editor ---- */
   .menu-edit-intro{ font-size:13px; color: var(--shell-text-dim); line-height:1.5; margin-bottom:18px; }
-  .menu-edit-cat{ background: var(--paper); color: var(--ink); border-radius: var(--radius); box-shadow: var(--card-shadow); padding:14px 16px; margin-bottom:14px; }
+  .menu-edit-cat{ background: var(--paper); color: var(--ink); border-radius: var(--radius); box-shadow: var(--card-shadow); padding:14px 16px; margin-bottom:14px; transition: box-shadow .15s ease; }
   .menu-edit-cat-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+  .menu-edit-cat-title-group{ display:flex; align-items:center; gap:8px; }
   .menu-edit-cat-title{ font-size:12px; letter-spacing:.1em; text-transform:uppercase; font-weight:800; color: var(--accent-gold); }
   .menu-edit-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px dashed var(--line); }
   .menu-edit-row:last-of-type{ border-bottom:none; }
@@ -341,6 +342,18 @@
     width:100%; text-align:left; margin-top:8px; padding:9px 0; background:none; border:none;
     color: var(--chili); font-size:13px; font-weight:700;
   }
+
+  /* ---- Drag to reorder (categories and items) ---- */
+  .drag-handle{
+    cursor: grab; touch-action: none; user-select:none; -webkit-user-select:none;
+    font-size:17px; color: var(--text-soft); flex-shrink:0; line-height:1;
+    padding: 6px 4px; margin: -6px 0 -6px -4px;
+  }
+  .menu-edit-cat.dragging, .menu-edit-row.dragging{
+    box-shadow: 0 10px 22px rgba(0,0,0,0.28); position:relative; z-index:50; background: var(--paper);
+  }
+  .drop-before{ border-top: 3px solid var(--chili) !important; }
+  .drop-after{ border-bottom: 3px solid var(--chili) !important; }
 
   @media (min-width: 700px){
     .grid-tables{ grid-template-columns: repeat(4, 1fr); }
@@ -996,7 +1009,7 @@
 
     return (
       '<div class="topbar"><div class="topbar-row">' +
-        '<div class="brand"><div class="kicker">Lenie\'s Food Cart</div><h1>Order Board</h1></div>' +
+        '<div class="brand"><div class="kicker">Street Food</div><h1>Order Board</h1></div>' +
         '<div class="topbar-actions">' + renderThemeToggle() + '<button class="theme-toggle" data-act="open-menu-editor" aria-label="Edit menu">\u270E</button><div class="today-chip">Today ' + peso(todayTotal) + '</div></div>' +
       '</div></div>' +
       '<main><div class="grid-tables">' + cards + '</div></main>' +
@@ -1009,6 +1022,7 @@
     var catsHtml = state.menu.map(function(cat){
       var itemsHtml = cat.items.map(function(it){
         return '<div class="menu-edit-row">' +
+          '<span class="drag-handle" data-drag="item" data-cat="' + cat.id + '" data-item="' + it.id + '">\u283f</span>' +
           '<div class="mi-name" data-act="edit-menu-item" data-cat="' + cat.id + '" data-item="' + it.id + '">' + escapeHtml(it.name) + '</div>' +
           '<div class="mi-price">' + peso(it.price) + '</div>' +
           '<button class="mi-delete" data-act="delete-menu-item" data-cat="' + cat.id + '" data-item="' + it.id + '" aria-label="Delete item">\u00d7</button>' +
@@ -1017,7 +1031,10 @@
       var canDeleteCat = cat.items.length === 0;
       return '<div class="menu-edit-cat">' +
         '<div class="menu-edit-cat-head">' +
-          '<div class="menu-edit-cat-title">' + escapeHtml(cat.cat) + '</div>' +
+          '<div class="menu-edit-cat-title-group">' +
+            '<span class="drag-handle" data-drag="cat" data-cat="' + cat.id + '">\u283f</span>' +
+            '<div class="menu-edit-cat-title">' + escapeHtml(cat.cat) + '</div>' +
+          '</div>' +
           (canDeleteCat ? '<button class="mi-delete" data-act="delete-menu-cat" data-cat="' + cat.id + '" aria-label="Delete category">\u00d7</button>' : '') +
         '</div>' +
         itemsHtml +
@@ -1031,7 +1048,7 @@
         '<div class="topbar-actions">' + renderThemeToggle() + '</div>' +
       '</div></div>' +
       '<main>' +
-        '<div class="menu-edit-intro">Edit prices, add items, or create new categories. Changes apply immediately on the order screen.</div>' +
+        '<div class="menu-edit-intro">Edit prices, add items, or create new categories. Drag \u283f to reorder. Changes apply immediately on the order screen.</div>' +
         catsHtml +
         '<button class="btn btn-outline-shell btn-full" data-act="open-add-category">+ Add Category</button>' +
       '</main>' +
@@ -1491,12 +1508,127 @@
     handleImportFile(ev.target);
   });
 
+  // ---------- drag-to-reorder for menu categories and items ----------
+  var dragState = null;
+
+  function startDrag(handle, ev){
+    var type = handle.getAttribute("data-drag");
+    var el = handle.closest(type === "cat" ? ".menu-edit-cat" : ".menu-edit-row");
+    if(!el) return;
+    var container = el.parentElement;
+    var selector = type === "cat" ? ".menu-edit-cat" : ".menu-edit-row";
+    var siblings = Array.prototype.filter.call(container.children, function(c){ return c.matches(selector); });
+    var others = siblings.filter(function(s){ return s !== el; }).map(function(s){
+      var r = s.getBoundingClientRect();
+      return { el: s, mid: r.top + r.height/2 };
+    });
+    dragState = {
+      type: type,
+      catId: parseInt(handle.getAttribute("data-cat"), 10),
+      itemId: handle.hasAttribute("data-item") ? parseInt(handle.getAttribute("data-item"), 10) : null,
+      el: el,
+      container: container,
+      others: others,
+      targetIndex: null,
+      startClientY: ev.clientY,
+      pointerId: ev.pointerId
+    };
+    el.classList.add("dragging");
+    try{ el.setPointerCapture(ev.pointerId); }catch(e){}
+  }
+
+  function updateDrag(ev){
+    if(!dragState) return;
+    var deltaY = ev.clientY - dragState.startClientY;
+    dragState.el.style.transform = "translateY(" + deltaY + "px)";
+
+    var count = 0;
+    for(var i=0;i<dragState.others.length;i++){
+      if(ev.clientY > dragState.others[i].mid) count++;
+    }
+    dragState.targetIndex = count;
+
+    var marks = dragState.container.querySelectorAll(".drop-before,.drop-after");
+    for(var m=0;m<marks.length;m++){ marks[m].classList.remove("drop-before","drop-after"); }
+    if(count < dragState.others.length){
+      dragState.others[count].el.classList.add("drop-before");
+    } else if(dragState.others.length){
+      dragState.others[dragState.others.length-1].el.classList.add("drop-after");
+    }
+  }
+
+  function endDrag(commit){
+    if(!dragState) return;
+    var d = dragState;
+    dragState = null;
+
+    if(commit && d.targetIndex !== null){
+      if(d.type === "cat"){
+        var ci = state.menu.findIndex(function(c){ return c.id === d.catId; });
+        if(ci !== -1){
+          var movedCat = state.menu.splice(ci,1)[0];
+          state.menu.splice(d.targetIndex, 0, movedCat);
+          persist();
+        }
+      } else {
+        var cat = state.menu.find(function(c){ return c.id === d.catId; });
+        if(cat){
+          var ii = cat.items.findIndex(function(i){ return i.id === d.itemId; });
+          if(ii !== -1){
+            var movedItem = cat.items.splice(ii,1)[0];
+            cat.items.splice(d.targetIndex, 0, movedItem);
+            persist();
+          }
+        }
+      }
+    }
+    render();
+  }
+
+  document.getElementById("app").addEventListener("pointerdown", function(ev){
+    var handle = ev.target.closest(".drag-handle");
+    if(!handle) return;
+    ev.preventDefault();
+    startDrag(handle, ev);
+  });
+  document.getElementById("app").addEventListener("pointermove", function(ev){
+    if(!dragState || ev.pointerId !== dragState.pointerId) return;
+    ev.preventDefault();
+    updateDrag(ev);
+  });
+  document.getElementById("app").addEventListener("pointerup", function(ev){
+    if(!dragState || ev.pointerId !== dragState.pointerId) return;
+    endDrag(true);
+  });
+  document.getElementById("app").addEventListener("pointercancel", function(ev){
+    if(!dragState || ev.pointerId !== dragState.pointerId) return;
+    endDrag(false);
+  });
+
   render();
 
   // ---------- register service worker for offline use (only works when hosted, e.g. GitHub Pages) ----------
   if("serviceWorker" in navigator){
     window.addEventListener("load", function(){
-      navigator.serviceWorker.register("./sw.js").catch(function(){ /* not available, e.g. opened as a local file */ });
+      navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then(function(reg){
+        // Check for a newer version right away, and again whenever the app
+        // is brought back to the foreground (not just on a full app restart).
+        reg.update().catch(function(){});
+        document.addEventListener("visibilitychange", function(){
+          if(document.visibilityState === "visible"){
+            reg.update().catch(function(){});
+          }
+        });
+      }).catch(function(){ /* not available, e.g. opened as a local file */ });
+
+      // Once a newer service worker has taken over, reload once so the
+      // updated app actually loads instead of sitting on the old version.
+      var alreadyReloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function(){
+        if(alreadyReloaded) return;
+        alreadyReloaded = true;
+        window.location.reload();
+      });
     });
   }
 })();

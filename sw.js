@@ -1,7 +1,7 @@
 // Order Board service worker
 // Bump CACHE_NAME (e.g. v1 -> v2) whenever the app is updated,
 // so returning visitors get the new version instead of a stale cached copy.
-const CACHE_NAME = "order-board-v6";
+const CACHE_NAME = "order-board-v8";
 const APP_SHELL = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", function(event){
