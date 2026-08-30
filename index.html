@@ -332,6 +332,8 @@
   .theme-select-btn{ padding:7px 16px; border-radius:999px; background: var(--paper-dim); border:1px solid var(--line); color: var(--text-soft); font-size:13px; font-weight:700; }
   .theme-select-btn.active{ background: var(--chili); border-color: var(--chili); color: var(--paper); }
   .settings-input-label{ display:block; font-size:12px; font-weight:700; color: var(--text-soft); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+  .settings-input-label.spaced{ margin-top:14px; }
+  .settings-link.with-divider{ margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
   .settings-input{ width:100%; padding:12px; border-radius:8px; border:1.5px solid var(--line); background: var(--paper-dim); color: var(--ink); font-size:15px; }
   .verify-code-box{
     font-family: var(--font-mono); font-size:28px; font-weight:800; letter-spacing:.3em;
@@ -340,6 +342,13 @@
   }
   .settings-link{ width:100%; display:flex; align-items:center; justify-content:space-between; background:none; border:none; color: var(--ink); font-size:14px; font-weight:600; padding:2px 0; }
   .settings-link-arrow{ color: var(--text-soft); font-size:18px; }
+
+  /* ---- Changelog ---- */
+  .changelog-entry{ margin-bottom:22px; }
+  .changelog-version{ font-family: var(--font-mono); font-size:16px; font-weight:800; color: var(--shell-text); margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+  .changelog-badge{ font-family: var(--font-display); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background: var(--leaf); color: var(--paper); padding:2px 8px; border-radius:999px; }
+  .changelog-list{ margin:0; padding-left:18px; color: var(--shell-text-dim); font-size:13px; line-height:1.7; }
+  .changelog-list li{ margin-bottom:2px; }
   .settings-title{ margin: 4px 0 0; font-size:22px; font-weight:800; letter-spacing:-0.02em; }
   .settings-actions{ display:flex; gap:10px; }
   .visually-hidden{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
@@ -482,6 +491,59 @@
     { id:4, name:"4", custom:false }
   ];
 
+  var CHANGELOG = [
+    { version:"v13", changes:[
+      "Set your actual working hours so late-night sales (past midnight) count as the same business day everywhere \u2014 Today's total, Reset, and reports",
+      "Pick a date range (not just one day) to view or export combined sales across several days",
+      "Settings now shows a version history \u2014 this screen"
+    ]},
+    { version:"v12", changes:[
+      "Undo an accidental Paid tap \u2014 expand a transaction to restore it back to its table",
+      "Pick and export any specific past day's sales",
+      "Reset Today now requires typing a random confirmation code, so it can't be tapped by accident"
+    ]},
+    { version:"v11", changes:[
+      "New Settings screen (gear icon) consolidating theme, business name, menu editing, and backup",
+      "Fixed invisible text and buttons in dark mode",
+      "Business name now shows as a subtitle, keeping \u201cOrder Board\u201d as the app's own name"
+    ]},
+    { version:"v10", changes:[
+      "Weekly, Monthly, and All-Time sales analytics with a day-by-day breakdown",
+      "Fully editable menu \u2014 rename, reprice, add, delete, and drag to reorder categories and items",
+      "Full data backup and restore"
+    ]},
+    { version:"v9", changes:[
+      "Paid button now flashes to confirm before returning to Tables",
+      "The table you just paid off gets a soft settle animation on the Tables screen"
+    ]},
+    { version:"v8", changes:[
+      "Reliable background auto-updates when the app is hosted online"
+    ]},
+    { version:"v7", changes:[
+      "Split bills \u2014 separate, individually payable checks at the same table"
+    ]},
+    { version:"v6", changes:[
+      "Cash Received field with automatic change calculation"
+    ]},
+    { version:"v5", changes:[
+      "Custom tables you can add and remove",
+      "Light and dark theme"
+    ]},
+    { version:"v4", changes:[
+      "Installable home-screen app icon",
+      "Offline support once installed"
+    ]},
+    { version:"v3", changes:[
+      "Professional letterhead-style PDF sales report export"
+    ]},
+    { version:"v2", changes:[
+      "CSV export of daily sales"
+    ]},
+    { version:"v1", changes:[
+      "Original release \u2014 table-by-table ordering, running bills, Paid and Clear actions"
+    ]}
+  ];
+
   var storageWorks = true;
   function loadState(){
     try{
@@ -500,7 +562,7 @@
       tables: state.tables, history: state.history, theme: state.theme,
       tableList: state.tableList, nextCustomId: state.nextCustomId,
       menu: state.menu, nextMenuCatId: state.nextMenuCatId, nextMenuItemId: state.nextMenuItemId,
-      businessName: state.businessName
+      businessName: state.businessName, workStart: state.workStart, workEnd: state.workEnd
     };
   }
   // Older saved data stored each table as a flat item array. Newer format stores
@@ -520,7 +582,7 @@
     return out;
   }
 
-  var APP_VERSION = "v12";
+  var APP_VERSION = "v13";
   var loaded = loadState();
   var state = {
     view: "tables",
@@ -530,7 +592,8 @@
     modal: null,
     cashInput: "",
     summaryPeriod: "today",
-    customDate: null,
+    customDateFrom: null,
+    customDateTo: null,
     expandedTxnId: null,
     editingCat: null,
     theme: (loaded && loaded.theme) || "dark",
@@ -541,7 +604,9 @@
     menu: (loaded && loaded.menu) || JSON.parse(JSON.stringify(DEFAULT_MENU)),
     nextMenuCatId: (loaded && loaded.nextMenuCatId) || 7,
     nextMenuItemId: (loaded && loaded.nextMenuItemId) || 16,
-    businessName: (loaded && loaded.businessName) || ""
+    businessName: (loaded && loaded.businessName) || "",
+    workStart: (loaded && loaded.workStart) || "18:00",
+    workEnd: (loaded && loaded.workEnd) || "02:00"
   };
   document.body.classList.toggle("theme-light", state.theme === "light");
 
@@ -569,10 +634,34 @@
   function tableCount(id){
     return tableSplits(id).reduce(function(sum, sp){ return sum + splitCount(sp); }, 0);
   }
-  function todayStr(){ return new Date().toDateString(); }
+  function parseTimeToMinutes(hhmm){
+    var parts = (hhmm || "00:00").split(":");
+    return (parseInt(parts[0],10)||0) * 60 + (parseInt(parts[1],10)||0);
+  }
+  function formatMinutesAsTime(min){
+    min = ((min % 1440) + 1440) % 1440;
+    var h = Math.floor(min/60), m = min % 60;
+    var ampm = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12; if(h12 === 0) h12 = 12;
+    return h12 + ":" + pad2(m) + " " + ampm;
+  }
+  function computeCutoffMinutes(){
+    var startMin = parseTimeToMinutes(state.workStart);
+    var endMin = parseTimeToMinutes(state.workEnd);
+    var offDuration = (startMin - endMin + 1440) % 1440;
+    if(offDuration === 0) offDuration = 1440;
+    return Math.round((endMin + offDuration/2) % 1440);
+  }
+  function businessDayKey(date){
+    var cutoffMin = computeCutoffMinutes();
+    var shifted = new Date(date.getTime() - cutoffMin*60000);
+    return shifted.getFullYear() + "-" + pad2(shifted.getMonth()+1) + "-" + pad2(shifted.getDate());
+  }
+  function currentBusinessDayKey(){ return businessDayKey(new Date()); }
+  function todayStr(){ return fmtDayLabel(parseISODate(currentBusinessDayKey())); }
   function todaysHistory(){
-    var t = todayStr();
-    return state.history.filter(function(h){ return new Date(h.ts).toDateString() === t; });
+    var key = currentBusinessDayKey();
+    return state.history.filter(function(h){ return businessDayKey(new Date(h.ts)) === key; });
   }
   function fmtTime(iso){
     var d = new Date(iso);
@@ -603,8 +692,24 @@
     var p = iso.split("-");
     return new Date(parseInt(p[0],10), parseInt(p[1],10)-1, parseInt(p[2],10));
   }
+  function isSingleDayPeriod(period){
+    if(period === "today") return true;
+    if(period === "custom") return !!(state.customDateFrom && state.customDateFrom === state.customDateTo);
+    return false;
+  }
   function reportDateParts(period){
-    var d = (period === "custom" && state.customDate) ? parseISODate(state.customDate) : new Date();
+    if(period === "custom" && state.customDateFrom){
+      var f = parseISODate(state.customDateFrom);
+      if(state.customDateFrom === state.customDateTo){
+        return { iso: state.customDateFrom, long: f.toLocaleDateString(undefined, { year:"numeric", month:"long", day:"numeric" }) };
+      }
+      var t = parseISODate(state.customDateTo);
+      return {
+        iso: state.customDateFrom + "_to_" + state.customDateTo,
+        long: f.toLocaleDateString(undefined, { month:"long", day:"numeric" }) + " \u2013 " + t.toLocaleDateString(undefined, { year:"numeric", month:"long", day:"numeric" })
+      };
+    }
+    var d = new Date();
     var iso = d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
     var long = d.toLocaleDateString(undefined, { year:"numeric", month:"long", day:"numeric" });
     return { iso: iso, long: long };
@@ -619,30 +724,34 @@
     if(period === "today") return todaysHistory();
     if(period === "all") return state.history.slice();
     if(period === "custom"){
-      var target = state.customDate;
+      var from = state.customDateFrom, to = state.customDateTo;
+      if(!from || !to) return [];
       return state.history.filter(function(h){
-        var d = new Date(h.ts);
-        var key = d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
-        return key === target;
+        var key = businessDayKey(new Date(h.ts));
+        return key >= from && key <= to;
       });
     }
-    var now = new Date();
-    var start = period === "week" ? startOfWeek(now) : startOfMonth(now);
-    return state.history.filter(function(h){ return new Date(h.ts) >= start; });
+    var refDate = parseISODate(currentBusinessDayKey());
+    var startDateKey = period === "week" ? startOfWeek(refDate) : startOfMonth(refDate);
+    var startInstant = new Date(startDateKey.getTime() + computeCutoffMinutes()*60000);
+    return state.history.filter(function(h){ return new Date(h.ts) >= startInstant; });
   }
   function periodLabel(period){
     if(period === "today") return "Today\u2019s";
     if(period === "week") return "This Week\u2019s";
     if(period === "month") return "This Month\u2019s";
-    if(period === "custom") return state.customDate ? fmtDayLabel(parseISODate(state.customDate)) : "That Day\u2019s";
+    if(period === "custom"){
+      if(!state.customDateFrom) return "That Day\u2019s";
+      if(state.customDateFrom === state.customDateTo) return fmtDayLabel(parseISODate(state.customDateFrom));
+      return fmtDayLabel(parseISODate(state.customDateFrom)) + " \u2013 " + fmtDayLabel(parseISODate(state.customDateTo));
+    }
     return "All-Time";
   }
   function groupByDay(txns){
     var map = {};
     txns.forEach(function(h){
-      var d = new Date(h.ts);
-      var key = d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
-      if(!map[key]) map[key] = { key:key, date:d, total:0, orders:0 };
+      var key = businessDayKey(new Date(h.ts));
+      if(!map[key]) map[key] = { key:key, date: parseISODate(key), total:0, orders:0 };
       map[key].total += h.total;
       map[key].orders += 1;
     });
@@ -833,9 +942,18 @@
   function closeMenuEditor(){ state.view = "settings"; render(); window.scrollTo(0,0); }
   function openSettings(){ state.view = "settings"; state.modal = null; render(); window.scrollTo(0,0); }
   function closeSettings(){ state.view = "tables"; render(); window.scrollTo(0,0); }
+  function openChangelog(){ state.view = "changelog"; state.modal = null; render(); window.scrollTo(0,0); }
+  function closeChangelog(){ state.view = "settings"; render(); window.scrollTo(0,0); }
   function updateBusinessName(value){
     state.businessName = value.slice(0, 40);
     persist();
+  }
+  function setWorkHours(field, value){
+    if(!value) return;
+    if(field === "start") state.workStart = value;
+    else if(field === "end") state.workEnd = value;
+    persist();
+    render();
   }
 
   function openAddCategoryForm(){ state.modal = { type:"add-category" }; render(); }
@@ -969,9 +1087,13 @@
     render();
   }
   function submitDatePick(){
-    var input = document.getElementById("date-pick-input");
-    if(!input || !input.value) return;
-    state.customDate = input.value;
+    var fromInput = document.getElementById("date-from-input");
+    var toInput = document.getElementById("date-to-input");
+    if(!fromInput || !toInput || !fromInput.value || !toInput.value) return;
+    var from = fromInput.value, to = toInput.value;
+    if(to < from){ var tmp = from; from = to; to = tmp; }
+    state.customDateFrom = from;
+    state.customDateTo = to;
     state.summaryPeriod = "custom";
     state.expandedTxnId = null;
     state.modal = null;
@@ -1019,8 +1141,8 @@
     var input = document.getElementById("reset-verify-input");
     var typed = input ? input.value.trim().toUpperCase() : "";
     if(!state.modal || typed !== state.modal.code) return;
-    var t = todayStr();
-    state.history = state.history.filter(function(h){ return new Date(h.ts).toDateString() !== t; });
+    var key = currentBusinessDayKey();
+    state.history = state.history.filter(function(h){ return businessDayKey(new Date(h.ts)) !== key; });
     state.modal = null;
     persist();
     render();
@@ -1032,7 +1154,7 @@
     if(!txns.length) return;
     var summary = computeDaySummary(txns);
     var dp = reportDateParts(period);
-    var titleWord = (period === "today" || period === "custom") ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : "All-Time";
+    var titleWord = isSingleDayPeriod(period) ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : period === "custom" ? "Custom Range" : "All-Time";
     var brandName = state.businessName || "Order Board";
 
     var rows = [];
@@ -1048,7 +1170,7 @@
     rows.push(["Item", "Qty Sold", "Revenue (PHP)"]);
     summary.best.forEach(function(b){ rows.push([b.name, b.qty, b.revenue]); });
     rows.push([]);
-    if(period === "today" || period === "custom"){
+    if(isSingleDayPeriod(period)){
       rows.push(["TRANSACTIONS"]);
       rows.push(["Time", "Table", "Items", "Total (PHP)"]);
       summary.txns.forEach(function(h){
@@ -1086,7 +1208,7 @@
     var dp = reportDateParts(period);
     var dateStr = dp.long;
     var genStr = new Date().toLocaleString(undefined, { hour:"numeric", minute:"2-digit" });
-    var titleWord = (period === "today" || period === "custom") ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : "All-Time";
+    var titleWord = isSingleDayPeriod(period) ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : period === "custom" ? "Custom Range" : "All-Time";
 
     var bestRows = summary.best.length
       ? summary.best.map(function(b,i){
@@ -1095,7 +1217,7 @@
       : '<tr><td colspan="4" style="text-align:center;color:#9a9187;">No sales recorded</td></tr>';
 
     var detailTitle, detailTable;
-    if(period === "today" || period === "custom"){
+    if(isSingleDayPeriod(period)){
       var txnRows = summary.txns.map(function(h){
         var itemsStr = h.items.map(function(i){ return i.qty + "x " + escapeHtml(i.name); }).join(", ");
         return '<tr><td>' + fmtTime(h.ts) + '</td><td>' + escapeHtml(tableDisplayName(h.table)) + '</td><td>' + itemsStr + '</td><td class="num">' + peso(h.total) + '</td></tr>';
@@ -1219,6 +1341,24 @@
     );
   }
 
+  function renderChangelogScreen(){
+    var itemsHtml = CHANGELOG.map(function(entry, idx){
+      return '<div class="changelog-entry">' +
+        '<div class="changelog-version">' + entry.version + (idx===0 ? ' <span class="changelog-badge">Current</span>' : '') + '</div>' +
+        '<ul class="changelog-list">' + entry.changes.map(function(c){ return '<li>' + escapeHtml(c) + '</li>'; }).join('') + '</ul>' +
+      '</div>';
+    }).join('');
+    return (
+      '<div class="topbar"><div class="topbar-row">' +
+        '<button class="back-btn" data-act="close-changelog"><span class="arrow">‹</span> Settings</button>' +
+      '</div>' +
+      '<h1 class="settings-title">What\u2019s New</h1>' +
+      '</div>' +
+      '<main>' + itemsHtml + '</main>' +
+      renderModal()
+    );
+  }
+
   function renderSettingsScreen(){
     return (
       '<div class="topbar"><div class="topbar-row">' +
@@ -1236,6 +1376,15 @@
               '<button class="theme-select-btn ' + (state.theme==="light"?"active":"") + '" data-act="set-theme" data-theme="light">Light</button>' +
             '</div>' +
           '</div>' +
+        '</div>' +
+
+        '<div class="cat-label">Working Hours</div>' +
+        '<div class="settings-card">' +
+          '<label class="settings-input-label" for="work-start-input">Start</label>' +
+          '<input id="work-start-input" type="time" class="settings-input" value="' + state.workStart + '" data-act="work-start-input">' +
+          '<label class="settings-input-label spaced" for="work-end-input">End</label>' +
+          '<input id="work-end-input" type="time" class="settings-input" value="' + state.workEnd + '" data-act="work-end-input">' +
+          '<div class="hint-text left">Sales are grouped into "days" based on these hours, so late-night sales past midnight still count as the same shift. Day rolls over around ' + formatMinutesAsTime(computeCutoffMinutes()) + '.</div>' +
         '</div>' +
 
         '<div class="cat-label">Business</div>' +
@@ -1262,6 +1411,7 @@
         '<div class="cat-label">About</div>' +
         '<div class="settings-card">' +
           '<div class="settings-row"><div class="settings-row-label">Version</div><div class="settings-row-value">' + APP_VERSION + '</div></div>' +
+          '<button class="settings-link with-divider" data-act="open-changelog">What\u2019s New <span class="settings-link-arrow">\u203a</span></button>' +
         '</div>' +
       '</main>' +
       renderModal()
@@ -1384,7 +1534,7 @@
       : '<div class="empty-state">No sales in this period yet.</div>';
 
     var detailHtml;
-    if(period === "today" || period === "custom"){
+    if(isSingleDayPeriod(period)){
       var txnsDesc = txns.slice().reverse();
       detailHtml = txnsDesc.length
         ? '<div class="cat-label">Transactions</div><div>' + txnsDesc.map(function(h){
@@ -1426,12 +1576,16 @@
     var hasTodayHistory = todaysHistory().length > 0;
 
     var periods = [["today","Today"],["week","Week"],["month","Month"],["all","All Time"]];
+    var dateChipLabel = "\ud83d\udcc5";
+    if(period === "custom" && state.customDateFrom){
+      dateChipLabel = (state.customDateFrom === state.customDateTo)
+        ? fmtDayLabel(parseISODate(state.customDateFrom))
+        : (fmtDayLabel(parseISODate(state.customDateFrom)) + " \u2013 " + fmtDayLabel(parseISODate(state.customDateTo)));
+    }
     var periodTabsHtml = '<div class="period-tabs">' + periods.map(function(p){
       return '<button class="period-tab ' + (period===p[0]?"active":"") + '" data-act="set-period" data-period="' + p[0] + '">' + p[1] + '</button>';
     }).join("") +
-      '<button class="period-tab date-pick-btn ' + (period==="custom"?"active":"") + '" data-act="open-date-picker">' +
-        (period==="custom" && state.customDate ? fmtDayLabel(parseISODate(state.customDate)) : "\ud83d\udcc5") +
-      '</button>' +
+      '<button class="period-tab date-pick-btn ' + (period==="custom"?"active":"") + '" data-act="open-date-picker">' + dateChipLabel + '</button>' +
     '</div>';
 
     return (
@@ -1541,12 +1695,19 @@
         '</div></div>';
     }
     if(state.modal.type === "pick-date"){
+      var defaultFrom = state.customDateFrom || todayISO();
+      var defaultTo = state.customDateTo || todayISO();
       return '<div class="modal-backdrop" data-act="modal-backdrop">' +
         '<div class="modal-card">' +
-          '<h3>View a specific day</h3>' +
+          '<h3>View a date range</h3>' +
+          '<p>Pick the same date twice for a single day, or a range for several days combined.</p>' +
           '<div class="custom-form">' +
-            '<div><label class="settings-input-label" for="date-pick-input">Date</label>' +
-            '<input id="date-pick-input" type="date" class="settings-input" max="' + todayISO() + '" value="' + (state.customDate || todayISO()) + '"></div>' +
+            '<div class="row">' +
+              '<div><label class="settings-input-label" for="date-from-input">From</label>' +
+              '<input id="date-from-input" type="date" class="settings-input" max="' + todayISO() + '" value="' + defaultFrom + '"></div>' +
+              '<div><label class="settings-input-label" for="date-to-input">To</label>' +
+              '<input id="date-to-input" type="date" class="settings-input" max="' + todayISO() + '" value="' + defaultTo + '"></div>' +
+            '</div>' +
           '</div>' +
           '<div class="modal-actions">' +
             '<button class="btn btn-secondary" data-act="close-modal">Cancel</button>' +
@@ -1654,6 +1815,7 @@
     else if(state.view === "summary") html = renderSummaryScreen();
     else if(state.view === "menu") html = renderMenuScreen();
     else if(state.view === "settings") html = renderSettingsScreen();
+    else if(state.view === "changelog") html = renderChangelogScreen();
     else html = renderTablesScreen();
     app.innerHTML = html;
     applyKeyboardOffset();
@@ -1734,6 +1896,8 @@
     else if(act === "close-menu-editor") closeMenuEditor();
     else if(act === "open-settings") openSettings();
     else if(act === "close-settings") closeSettings();
+    else if(act === "open-changelog") openChangelog();
+    else if(act === "close-changelog") closeChangelog();
     else if(act === "set-theme") setTheme(el.getAttribute("data-theme"));
     else if(act === "open-add-category") openAddCategoryForm();
     else if(act === "submit-add-category") submitAddCategory();
@@ -1784,6 +1948,11 @@
 
   document.getElementById("import-file-input").addEventListener("change", function(ev){
     handleImportFile(ev.target);
+  });
+
+  document.getElementById("app").addEventListener("change", function(ev){
+    if(ev.target.matches('[data-act="work-start-input"]')) setWorkHours("start", ev.target.value);
+    else if(ev.target.matches('[data-act="work-end-input"]')) setWorkHours("end", ev.target.value);
   });
 
   // ---------- drag-to-reorder for menu categories and items ----------
