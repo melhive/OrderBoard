@@ -363,11 +363,14 @@
   .period-tab.active{ background: var(--chili); border-color: var(--chili); color: var(--paper); }
 
   /* ---- Daily breakdown bars (Week/Month/All) ---- */
-  .day-row{ display:flex; align-items:center; gap:10px; padding:8px 0; }
+  .day-row-wrap{ border-bottom:1px solid var(--shell-border); }
+  .day-row-wrap:last-child{ border-bottom:none; }
+  .day-row{ display:flex; align-items:center; gap:10px; padding:8px 0; cursor:pointer; }
   .day-row .day-label{ width:58px; flex-shrink:0; font-size:12px; color: var(--shell-text-dim); font-family: var(--font-mono); }
   .day-row .day-bar-track{ flex:1; height:10px; background: var(--shell-bg-soft); border-radius:5px; overflow:hidden; }
   .day-row .day-bar-fill{ height:100%; background: var(--chili); border-radius:5px; }
   .day-row .day-amt{ width:64px; flex-shrink:0; text-align:right; font-family: var(--font-mono); font-size:12px; font-weight:700; }
+  .day-txns{ margin: 0 0 10px 8px; padding-left:10px; border-left:2px solid var(--shell-border); }
 
   /* ---- Menu editor ---- */
   .menu-edit-intro{ font-size:13px; color: var(--shell-text-dim); line-height:1.5; margin-bottom:18px; }
@@ -492,6 +495,9 @@
   ];
 
   var CHANGELOG = [
+    { version:"v14", changes:[
+      "Multi-day reports are now drill-down \u2014 tap any day in a date range to see its actual transactions and items, not just the day's total"
+    ]},
     { version:"v13", changes:[
       "Set your actual working hours so late-night sales (past midnight) count as the same business day everywhere \u2014 Today's total, Reset, and reports",
       "Pick a date range (not just one day) to view or export combined sales across several days",
@@ -582,7 +588,7 @@
     return out;
   }
 
-  var APP_VERSION = "v13";
+  var APP_VERSION = "v14";
   var loaded = loadState();
   var state = {
     view: "tables",
@@ -595,6 +601,7 @@
     customDateFrom: null,
     customDateTo: null,
     expandedTxnId: null,
+    expandedDayKey: null,
     editingCat: null,
     theme: (loaded && loaded.theme) || "dark",
     tableList: (loaded && loaded.tableList) || DEFAULT_TABLES.slice(),
@@ -1096,12 +1103,18 @@
     state.customDateTo = to;
     state.summaryPeriod = "custom";
     state.expandedTxnId = null;
+    state.expandedDayKey = null;
     state.modal = null;
     render();
   }
 
   function toggleTxnExpand(txnId){
     state.expandedTxnId = (state.expandedTxnId === txnId) ? null : txnId;
+    render();
+  }
+  function toggleDayExpand(dayKey){
+    state.expandedDayKey = (state.expandedDayKey === dayKey) ? null : dayKey;
+    state.expandedTxnId = null;
     render();
   }
   function tableDisplayName(tableId){
@@ -1521,6 +1534,29 @@
     );
   }
 
+  function renderTxnRows(txnsArray){
+    var txnsDesc = txnsArray.slice().reverse();
+    if(!txnsDesc.length) return "";
+    return txnsDesc.map(function(h){
+      var isOpen = h.id === state.expandedTxnId;
+      var itemCount = h.items.reduce(function(s,i){return s+i.qty;},0);
+      var itemsHtml = h.items.map(function(it){
+        return '<div class="txn-item-row"><div class="ti-name">' + it.qty + 'x ' + escapeHtml(it.name) + '</div><div class="ti-amt">' + peso(it.price*it.qty) + '</div></div>';
+      }).join("");
+      return '<div class="txn-row-wrap">' +
+        '<div class="txn-row" data-act="toggle-txn" data-txn="' + h.id + '">' +
+          '<div class="time">' + fmtTime(h.ts) + '</div>' +
+          '<div class="desc"><b>' + escapeHtml(tableDisplayName(h.table)) + '</b> · ' + itemCount + ' items</div>' +
+          '<div class="amt">' + peso(h.total) + '</div>' +
+          '<div class="txn-chevron ' + (isOpen?"open":"") + '">\u203a</div>' +
+        '</div>' +
+        (isOpen ? '<div class="txn-detail">' + itemsHtml +
+          '<button class="btn btn-outline-shell txn-restore-btn" data-act="ask-restore-txn" data-txn="' + h.id + '">\u21a9 Restore to Table</button>' +
+        '</div>' : '') +
+      '</div>';
+    }).join("");
+  }
+
   function renderSummaryScreen(){
     var period = state.summaryPeriod;
     var txns = periodHistory(period);
@@ -1535,37 +1571,25 @@
 
     var detailHtml;
     if(isSingleDayPeriod(period)){
-      var txnsDesc = txns.slice().reverse();
-      detailHtml = txnsDesc.length
-        ? '<div class="cat-label">Transactions</div><div>' + txnsDesc.map(function(h){
-            var isOpen = h.id === state.expandedTxnId;
-            var itemCount = h.items.reduce(function(s,i){return s+i.qty;},0);
-            var itemsHtml = h.items.map(function(it){
-              return '<div class="txn-item-row"><div class="ti-name">' + it.qty + 'x ' + escapeHtml(it.name) + '</div><div class="ti-amt">' + peso(it.price*it.qty) + '</div></div>';
-            }).join("");
-            return '<div class="txn-row-wrap">' +
-              '<div class="txn-row" data-act="toggle-txn" data-txn="' + h.id + '">' +
-                '<div class="time">' + fmtTime(h.ts) + '</div>' +
-                '<div class="desc"><b>' + escapeHtml(tableDisplayName(h.table)) + '</b> · ' + itemCount + ' items</div>' +
-                '<div class="amt">' + peso(h.total) + '</div>' +
-                '<div class="txn-chevron ' + (isOpen?"open":"") + '">\u203a</div>' +
-              '</div>' +
-              (isOpen ? '<div class="txn-detail">' + itemsHtml +
-                '<button class="btn btn-outline-shell txn-restore-btn" data-act="ask-restore-txn" data-txn="' + h.id + '">\u21a9 Restore to Table</button>' +
-              '</div>' : '') +
-            '</div>';
-          }).join("") + '</div>'
+      detailHtml = txns.length
+        ? '<div class="cat-label">Transactions</div><div>' + renderTxnRows(txns) + '</div>'
         : "";
     } else {
       var days = groupByDay(txns);
       var maxDay = days.reduce(function(m,d){ return Math.max(m, d.total); }, 1);
       detailHtml = days.length
         ? '<div class="cat-label">Daily Breakdown</div><div>' + days.map(function(d){
+            var isDayOpen = d.key === state.expandedDayKey;
             var pct = Math.round((d.total / maxDay) * 100);
-            return '<div class="day-row">' +
-              '<div class="day-label">' + fmtDayLabel(d.date) + '</div>' +
-              '<div class="day-bar-track"><div class="day-bar-fill" style="width:' + pct + '%"></div></div>' +
-              '<div class="day-amt">' + peso(d.total) + '</div>' +
+            var dayTxns = isDayOpen ? txns.filter(function(h){ return businessDayKey(new Date(h.ts)) === d.key; }) : [];
+            return '<div class="day-row-wrap">' +
+              '<div class="day-row" data-act="toggle-day" data-day="' + d.key + '">' +
+                '<div class="day-label">' + fmtDayLabel(d.date) + '</div>' +
+                '<div class="day-bar-track"><div class="day-bar-fill" style="width:' + pct + '%"></div></div>' +
+                '<div class="day-amt">' + peso(d.total) + '</div>' +
+                '<div class="txn-chevron ' + (isDayOpen?"open":"") + '">\u203a</div>' +
+              '</div>' +
+              (isDayOpen ? '<div class="day-txns">' + renderTxnRows(dayTxns) + '</div>' : "") +
             '</div>';
           }).join("") + '</div>'
         : "";
@@ -1883,10 +1907,11 @@
     else if(act === "submit-custom") submitCustomItem(parseInt(t,10));
     else if(act === "ask-reset") askResetAll();
     else if(act === "confirm-reset") confirmResetAll();
-    else if(act === "set-period"){ state.summaryPeriod = el.getAttribute("data-period"); state.expandedTxnId = null; render(); }
+    else if(act === "set-period"){ state.summaryPeriod = el.getAttribute("data-period"); state.expandedTxnId = null; state.expandedDayKey = null; render(); }
     else if(act === "open-date-picker") openDatePicker();
     else if(act === "submit-date-pick") submitDatePick();
     else if(act === "toggle-txn") toggleTxnExpand(parseInt(el.getAttribute("data-txn"),10));
+    else if(act === "toggle-day") toggleDayExpand(el.getAttribute("data-day"));
     else if(act === "ask-restore-txn") askRestoreTxn(parseInt(el.getAttribute("data-txn"),10));
     else if(act === "confirm-restore-txn") confirmRestoreTxn(parseInt(el.getAttribute("data-txn"),10));
     else if(act === "open-export"){ if(periodHistory(state.summaryPeriod).length){ state.modal = { type:"export-menu" }; render(); } }
