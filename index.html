@@ -242,6 +242,8 @@
   .btn-export:active{ background: var(--leaf-dark); }
   .btn-outline-shell{ background: transparent; color: var(--shell-text); border: 1.5px solid var(--shell-border); }
   .btn-outline-shell:active{ background: var(--shell-bg-soft); }
+  .btn-outline-danger{ background: transparent; color: var(--chili); border: 1.5px solid var(--chili); }
+  .btn-outline-danger:active{ background: var(--chili); color: var(--paper); }
 
   /* ---- Pop + Flash tap feedback on menu items ---- */
   @keyframes tile-pop-flash{
@@ -315,7 +317,8 @@
   .txn-chevron.open{ transform: rotate(90deg); }
   .txn-detail{ padding: 0 0 14px 66px; }
   .txn-item-row{ display:flex; justify-content:space-between; gap:10px; font-family: var(--font-mono); font-size:12px; color: var(--shell-text-dim); padding:3px 0; }
-  .txn-restore-btn{ width:auto; flex:none; margin-top:10px; padding:8px 16px; font-size:12px; }
+  .txn-detail-actions{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+  .txn-restore-btn, .txn-delete-btn{ width:auto; flex:none; padding:8px 14px; font-size:12px; }
   .date-pick-btn{ margin-left:auto; }
 
   .empty-state{ text-align:center; color: var(--shell-text-dim); font-size:14px; padding: 30px 10px; line-height:1.6; }
@@ -495,6 +498,9 @@
   ];
 
   var CHANGELOG = [
+    { version:"v15", changes:[
+      "Delete Order \u2014 permanently void a mistaken payment from a transaction's expanded view, separate from Restore, with the same random-code confirmation as Reset Today"
+    ]},
     { version:"v14", changes:[
       "Multi-day reports are now drill-down \u2014 tap any day in a date range to see its actual transactions and items, not just the day's total"
     ]},
@@ -588,7 +594,7 @@
     return out;
   }
 
-  var APP_VERSION = "v14";
+  var APP_VERSION = "v15";
   var loaded = loadState();
   var state = {
     view: "tables",
@@ -1144,6 +1150,24 @@
     persist();
     render();
   }
+  function askDeleteTxn(txnId){
+    var h = state.history.find(function(x){ return x.id === txnId; });
+    if(!h) return;
+    state.modal = { type:"confirm-delete-txn", txnId: txnId, code: generateVerifyCode() };
+    render();
+  }
+  function confirmDeleteTxn(txnId){
+    var input = document.getElementById("delete-verify-input");
+    var typed = input ? input.value.trim().toUpperCase() : "";
+    if(!state.modal || typed !== state.modal.code) return;
+    var idx = state.history.findIndex(function(x){ return x.id === txnId; });
+    if(idx === -1) return;
+    state.history.splice(idx, 1);
+    state.expandedTxnId = null;
+    state.modal = null;
+    persist();
+    render();
+  }
 
   function askResetAll(){
     if(!todaysHistory().length) return;
@@ -1551,7 +1575,10 @@
           '<div class="txn-chevron ' + (isOpen?"open":"") + '">\u203a</div>' +
         '</div>' +
         (isOpen ? '<div class="txn-detail">' + itemsHtml +
-          '<button class="btn btn-outline-shell txn-restore-btn" data-act="ask-restore-txn" data-txn="' + h.id + '">\u21a9 Restore to Table</button>' +
+          '<div class="txn-detail-actions">' +
+            '<button class="btn btn-outline-shell txn-restore-btn" data-act="ask-restore-txn" data-txn="' + h.id + '">\u21a9 Restore to Table</button>' +
+            '<button class="btn btn-outline-danger txn-delete-btn" data-act="ask-delete-txn" data-txn="' + h.id + '">\ud83d\uddd1 Delete Order</button>' +
+          '</div>' +
         '</div>' : '') +
       '</div>';
     }).join("");
@@ -1759,6 +1786,20 @@
           '</div>' +
         '</div></div>';
     }
+    if(state.modal.type === "confirm-delete-txn"){
+      return '<div class="modal-backdrop" data-act="modal-backdrop">' +
+        '<div class="modal-card">' +
+          '<h3>Delete this order?</h3>' +
+          '<p>This permanently removes it from your sales records \u2014 it will NOT be restored to any table. This can\u2019t be undone.</p>' +
+          '<div class="verify-code-box">' + state.modal.code + '</div>' +
+          '<label class="settings-input-label" for="delete-verify-input">Type the code above to confirm</label>' +
+          '<input id="delete-verify-input" type="text" class="settings-input" autocomplete="off" autocapitalize="characters" data-act="delete-verify-input" placeholder="Type code">' +
+          '<div class="modal-actions">' +
+            '<button class="btn btn-secondary" data-act="close-modal">Cancel</button>' +
+            '<button class="btn btn-primary" id="delete-confirm-btn" data-act="confirm-delete-txn" data-txn="' + state.modal.txnId + '" disabled>Delete</button>' +
+          '</div>' +
+        '</div></div>';
+    }
     if(state.modal.type === "export-menu"){
       var expLabel = periodLabel(state.summaryPeriod);
       return '<div class="modal-backdrop" data-act="modal-backdrop">' +
@@ -1914,6 +1955,8 @@
     else if(act === "toggle-day") toggleDayExpand(el.getAttribute("data-day"));
     else if(act === "ask-restore-txn") askRestoreTxn(parseInt(el.getAttribute("data-txn"),10));
     else if(act === "confirm-restore-txn") confirmRestoreTxn(parseInt(el.getAttribute("data-txn"),10));
+    else if(act === "ask-delete-txn") askDeleteTxn(parseInt(el.getAttribute("data-txn"),10));
+    else if(act === "confirm-delete-txn") confirmDeleteTxn(parseInt(el.getAttribute("data-txn"),10));
     else if(act === "open-export"){ if(periodHistory(state.summaryPeriod).length){ state.modal = { type:"export-menu" }; render(); } }
     else if(act === "do-export-csv"){ closeModal(); exportCSV(); }
     else if(act === "do-export-pdf"){ closeModal(); exportPDF(); }
@@ -1947,6 +1990,12 @@
       var expectedCode = state.modal && state.modal.code;
       var confirmBtn = document.getElementById("reset-confirm-btn");
       if(confirmBtn) confirmBtn.disabled = (ev.target.value.trim().toUpperCase() !== expectedCode);
+      return;
+    }
+    if(ev.target.matches('[data-act="delete-verify-input"]')){
+      var expectedDeleteCode = state.modal && state.modal.code;
+      var deleteBtn = document.getElementById("delete-confirm-btn");
+      if(deleteBtn) deleteBtn.disabled = (ev.target.value.trim().toUpperCase() !== expectedDeleteCode);
       return;
     }
     if(!ev.target.matches('[data-act="cash-input"]')) return;
