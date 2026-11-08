@@ -1,7 +1,7 @@
 // Inline SVG icons (stroke-based, 24×24). Kept in one file so the app has no
 // icon-font or network dependency.
 
-import type { SVGProps } from "react";
+import { useId, type SVGProps } from "react";
 
 type P = SVGProps<SVGSVGElement>;
 
@@ -88,3 +88,98 @@ export const IconCash = (p: P) => (
     <path d="M6 12h.01M18 12h.01" />
   </Svg>
 );
+
+export const IconMore = (p: P) => (
+  <Svg {...p}>
+    <circle cx="12" cy="5" r="1.2" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="12" cy="19" r="1.2" fill="currentColor" />
+  </Svg>
+);
+export const IconArrowDown = (p: P) => <Svg {...p}><path d="M12 5v14M19 12l-7 7-7-7" /></Svg>;
+export const IconArrowUp = (p: P) => <Svg {...p}><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
+export const IconStop = (p: P) => <Svg {...p}><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none" /></Svg>;
+export const IconPalette = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 3.5-4 3.5h-1.7a1.8 1.8 0 0 0-1.3 3.1A1.9 1.9 0 0 1 12 22z" />
+    <circle cx="7.5" cy="10.5" r="1" fill="currentColor" />
+    <circle cx="11" cy="6.5" r="1" fill="currentColor" />
+    <circle cx="16" cy="8" r="1" fill="currentColor" />
+  </Svg>
+);
+export const IconVibrate = (p: P) => (
+  <Svg {...p}>
+    <rect x="7" y="4" width="10" height="16" rx="2" />
+    <path d="M3 9v6M21 9v6" />
+  </Svg>
+);
+export const IconStore = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 9l1.5-5h15L21 9" />
+    <path d="M3 9a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0" />
+    <path d="M5 11v9h14v-9M10 20v-5h4v5" />
+  </Svg>
+);
+export const IconClock = (p: P) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+export const IconBook = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z" />
+    <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5" />
+  </Svg>
+);
+export const IconDownload = (p: P) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></Svg>;
+export const IconUpload = (p: P) => <Svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></Svg>;
+export const IconInfo = (p: P) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></Svg>;
+export const IconStar = (p: P) => <Svg {...p}><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z" /></Svg>;
+export const IconDoc = (p: P) => (
+  <Svg {...p}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <path d="M14 2v6h6" />
+  </Svg>
+);
+export const IconVolume = (p: P) => (
+  <Svg {...p}>
+    <path d="M11 5L6 9H2v6h4l5 4z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" />
+  </Svg>
+);
+export const IconRepeat = (p: P) => <Svg {...p}><path d="M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3" /></Svg>;
+export const IconBell = (p: P) => <Svg {...p}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" /></Svg>;
+export const IconReceipt = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 2h14v20l-3-2-2 2-2-2-2 2-2-2-3 2z" />
+    <path d="M9 7h6M9 11h6M9 15h4" />
+  </Svg>
+);
+export const IconBowl = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 11h18a9 7.5 0 0 1-18 0z" />
+    <path d="M9 7c-1-1.3 1-2.2 0-3.6M12 7c-1-1.5 1-2.6 0-4M15 7c-1-1.3 1-2.2 0-3.6" />
+  </Svg>
+);
+export const IconTable = (p: P) => <Svg {...p}><path d="M3 8h18M5 8v12M19 8v12M8 8V5h8v3" /></Svg>;
+
+/** The app logo (same artwork as public/logo.svg). */
+export function LogoMark({ size = 32, ...p }: P & { size?: number }) {
+  const id = useId().replace(/:/g, "");
+  return (
+    <svg viewBox="0 0 512 512" width={size} height={size} aria-hidden="true" {...p}>
+      <defs>
+        <linearGradient id={`bg${id}`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#F0614F" />
+          <stop offset="1" stopColor="#B8312C" />
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="116" fill={`url(#bg${id})`} />
+      <g fill="none" stroke="#FFF6EA" strokeWidth="24" strokeLinecap="round" opacity="0.92">
+        <path d="M196 214c-16-22 14-40 0-66" />
+        <path d="M256 214c-16-26 14-46 0-80" />
+        <path d="M316 214c-16-22 14-40 0-66" />
+      </g>
+      <path d="M120 262h272a136 128 0 0 1-272 0z" fill="#FBF3E8" />
+      <rect x="104" y="244" width="304" height="30" rx="15" fill="#FFFBF4" />
+      <rect x="150" y="290" width="212" height="16" rx="8" fill="#F2A93B" />
+      <rect x="214" y="384" width="84" height="18" rx="9" fill="#F3E6D3" />
+    </svg>
+  );
+}

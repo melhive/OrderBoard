@@ -245,3 +245,117 @@ describe("app control", () => {
     expect(say("the weather is nice").tone).toBe("warn");
   });
 });
+
+describe("Taglish and everyday phrasing", () => {
+  it("understands Filipino numbers and 'at'", () => {
+    say("isang pares at dalawang mami table 1");
+    expect(bill(1)).toEqual(["1x Pares", "2x Mami"]);
+  });
+
+  it("ignores Filipino politeness particles", () => {
+    say("pa-order po ng 3 siomai sa table 4");
+    expect(bill(4)).toEqual(["3x Siomai"]);
+  });
+
+  it("answers 'magkano' about a table", () => {
+    say("2 pares for table 3");
+    expect(say("magkano table 3").text).toContain("₱120");
+  });
+
+  it("treats 'bayad na' as a payment", () => {
+    say("1 mami for table 2");
+    const r = say("table 2 bayad na");
+    expect(r.confirm?.plan.kind).toBe("pay");
+  });
+
+  it("answers sales questions in Taglish", () => {
+    expect(say("magkano benta ngayon").text).toMatch(/No sales recorded today/);
+  });
+});
+
+describe("safety of follow-up questions", () => {
+  it("a new request is not mistaken for a custom item's price", () => {
+    say("kwek kwek for table 2");
+    say("1 pares for table 3");
+    say("table 3 paid 200");
+    expect(bill(2)).toEqual([]);
+    expect(bill(3)).toEqual(["1x Pares"]);
+  });
+
+  it("does not offer unknown words as custom items without an order", () => {
+    const r = say("blah blah something");
+    expect(r.text).not.toMatch(/isn.t on the menu/);
+    expect(bill(1)).toEqual([]);
+  });
+
+  it("'remove the egg from table 3' never tries to remove the table", () => {
+    say("pares with egg for table 3");
+    const r = say("remove the egg from table 3");
+    expect(r.text).not.toMatch(/built-in table/);
+  });
+
+  it("a bare yes with nothing pending explains itself", () => {
+    expect(say("yes").text).toMatch(/nothing waiting/);
+  });
+
+  it("carries the quantity of a custom item", () => {
+    say("2 kwek kwek for table 1");
+    say("15");
+    expect(bill(1)).toEqual(["2x Kwek Kwek"]);
+  });
+});
+
+describe("new abilities", () => {
+  const seed = () => {
+    const now = Date.now();
+    const day = 24 * 3600 * 1000;
+    app().setData((d) => ({
+      ...d,
+      history: [
+        { id: 1, table: 1, items: [{ name: "Pares", price: 60, qty: 1 }], total: 60, ts: new Date(now - day).toISOString() },
+        { id: 2, table: 1, items: [{ name: "Pares", price: 60, qty: 2 }], total: 120, ts: new Date(now - 60_000).toISOString() },
+        { id: 3, table: 2, items: [{ name: "Water", price: 20, qty: 3 }], total: 60, ts: new Date(now).toISOString() },
+      ],
+    }));
+  };
+
+  it("moves a bill to another table", () => {
+    say("2 siomai for table 2");
+    const r = say("move table 2 to table 4");
+    expect(r.confirm?.plan.kind).toBe("moveTable");
+    confirmLast();
+    expect(bill(2)).toEqual([]);
+    expect(bill(4)).toEqual(["2x Siomai"]);
+  });
+
+  it("understands 'transfer table 1 to 3' without the second 'table'", () => {
+    say("1 water for table 1");
+    expect(say("transfer table 1 to 3").confirm?.plan).toEqual({ kind: "moveTable", from: 1, to: 3 });
+  });
+
+  it("works out change without paying", () => {
+    say("2 pares for table 1");
+    const r = say("change for 500 on table 1");
+    expect(r.text).toContain("₱380");
+    expect(app().data.history).toHaveLength(0);
+    expect(say("sukli sa 100 table 1").text).toMatch(/short by ₱20/);
+  });
+
+  it("compares today with yesterday", () => {
+    seed();
+    const r = say("compare today and yesterday");
+    expect(r.text).toContain("Today: ₱180");
+    expect(r.text).toContain("Yesterday: ₱60");
+    expect(r.text).toContain("+200%");
+  });
+
+  it("reports the average order", () => {
+    seed();
+    expect(say("average order today").text).toContain("₱90");
+  });
+
+  it("finds the busiest hour", () => {
+    seed();
+    expect(say("what is our busiest hour").text).toMatch(/busiest hour/);
+  });
+});

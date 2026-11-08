@@ -49,6 +49,8 @@ export interface ParsedLine {
 export interface ParseResult {
   lines: ParsedLine[];
   unknown: string[];
+  /** Unknown phrases with the quantity said for them ("2 halo halo"). */
+  unknownItems: { text: string; qty: number; explicitQty: boolean }[];
 }
 
 /** Words that carry no meaning for item matching. */
@@ -58,7 +60,10 @@ export const FILLER = new Set([
   "may", "need", "put", "more", "extra", "piece", "pieces", "pc", "pcs", "serving", "servings", "plate", "plates",
   "bowl", "bowls", "glass", "glasses", "bottle", "bottles", "cup", "cups", "order", "um", "uh", "uhm", "ah",
   "okay", "ok", "just", "lang", "then", "too", "x", "times", "each", "of", "one", "ones", "kindly", "yes", "now",
-  "it", "them", "that", "this", "is", "are", "be", "will", "let", "make", "do", "pesos", "peso", "php",
+  "it", "them", "that", "this", "is", "are", "be", "will", "let", "make", "do", "pesos", "peso", "php", "from",
+  // Filipino particles and fillers
+  "ang", "na", "ng", "nang", "yung", "ung", "iyong", "mga", "sa", "po", "pa", "pang", "pong", "nga", "naman", "ba",
+  "ko", "mo", "natin", "namin", "din", "rin", "nalang", "paki", "pakibigay", "bigyan", "bigay", "isang", "kay",
 ]);
 const SOFT = new Set(["and", "with", "n", "w"]);
 const HARD = new Set([",", "plus", "then", "also", "tsaka", "next"]);
@@ -263,6 +268,7 @@ export function parseItems(tokens: string[], index: MenuIndex): ParseResult {
   const merged = mergeCompounds(tokens, index.vocab);
   const lines: ParsedLine[] = [];
   const unknown: string[] = [];
+  const unknownItems: ParseResult["unknownItems"] = [];
   for (const chunk of chunkTokens(merged)) {
     const segs = segmentChunk(chunk, index);
     let prevQty = chunk.qty ?? 1;
@@ -272,6 +278,7 @@ export function parseItems(tokens: string[], index: MenuIndex): ParseResult {
       const heard = chunk.tokens.slice(seg.start, seg.end).join(" ");
       if (!seg.match) {
         unknown.push(seg.content.join(" "));
+        unknownItems.push({ text: seg.content.join(" "), qty, explicitQty: k === 0 && chunk.qty !== null });
         return;
       }
       const existing = lines.find((l) => l.item.id === seg.match!.entry.id);
@@ -279,7 +286,7 @@ export function parseItems(tokens: string[], index: MenuIndex): ParseResult {
       else lines.push({ item: seg.match.entry, qty, confidence: seg.match.confidence, heard });
     });
   }
-  return { lines, unknown };
+  return { lines, unknown, unknownItems };
 }
 
 /** Finds a single menu item named in a phrase (for price questions, menu edits). */

@@ -1,7 +1,7 @@
 // Applies agent Plans to the app store. Every mutating plan records an undo
 // checkpoint first, so "undo" (or the Undo button) reverts it exactly.
 
-import { useApp } from "../store/appStore";
+import { currentRoute, useApp } from "../store/appStore";
 import type { Plan } from "./types";
 import { exportAllData, exportReport } from "../store/exports";
 
@@ -23,8 +23,11 @@ export function executePlan(plan: Plan): ExecResult {
       const r = plan.route;
       if (r.name === "order") app.openTable(r.tableId);
       else if (r.name === "tables" || r.name === "summary") app.goTab(r.name);
-      else app.push(r);
-      app.setAgentOpen(false);
+      else {
+        // Leave the chat, then open the screen (Back returns to where you were).
+        if (currentRoute(app).name === "ask") app.back();
+        useApp.getState().push(r);
+      }
       return { ok: true };
     }
     case "setTheme":
@@ -74,6 +77,13 @@ export function executePlan(plan: Plan): ExecResult {
       return { ok: true };
     case "addTable":
       app.addTable(plan.name);
+      return { ok: true };
+    case "moveTable":
+      app.setData((dd) => {
+        const moving = (dd.tables[plan.from] ?? []).filter((sp) => sp.items.length);
+        const staying = (dd.tables[plan.to] ?? []).filter((sp) => sp.items.length);
+        return { ...dd, tables: { ...dd.tables, [plan.from]: [], [plan.to]: [...staying, ...moving.map((sp) => ({ items: sp.items.map((i) => ({ ...i })) }))] } };
+      });
       return { ok: true };
     case "removeTable":
       app.removeTable(plan.tableId);

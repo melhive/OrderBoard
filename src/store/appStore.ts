@@ -15,6 +15,7 @@ export type Route =
   | { name: "tables" }
   | { name: "order"; tableId: number }
   | { name: "summary" }
+  | { name: "ask" }
   | { name: "settings" }
   | { name: "menu" }
   | { name: "changelog" }
@@ -34,7 +35,8 @@ export type Dialog =
   | { type: "category-form"; catId: number | null }
   | { type: "menu-item-form"; catId: number; itemId: number | null }
   | { type: "confirm-restore-backup"; pending: AppData }
-  | { type: "import-error" };
+  | { type: "import-error" }
+  | { type: "confirm-clear-chat" };
 
 export interface Toast {
   id: number;
@@ -54,7 +56,6 @@ interface UIState {
   navDir: 1 | -1;
   dialog: Dialog | null;
   sheetOpen: boolean;
-  agentOpen: boolean;
   activeSplit: number;
   cashInput: string;
   summary: PeriodSpec;
@@ -78,7 +79,8 @@ export interface AppState extends UIState {
   canGoBack(): boolean;
   openTable(id: number): void;
   setSheet(open: boolean): void;
-  setAgentOpen(open: boolean): void;
+  /** Opens the Ask Agent screen on top of the current one. */
+  openAsk(): void;
   openDialog(d: Dialog): void;
   closeDialog(): void;
   showToast(t: Omit<Toast, "id">): void;
@@ -192,7 +194,6 @@ const initialUI: UIState = {
   navDir: 1,
   dialog: null,
   sheetOpen: false,
-  agentOpen: false,
   activeSplit: 0,
   cashInput: "",
   summary: { period: "today", from: null, to: null },
@@ -239,7 +240,7 @@ export const useApp = create<AppState>()((set, get) => {
     },
     goTab(name) {
       set((s) => {
-        if (s.stack.length === 1 && s.stack[0]!.name === name) return { dialog: null, agentOpen: false };
+        if (s.stack.length === 1 && s.stack[0]!.name === name) return { dialog: null };
         return {
           stack: name === "tables" ? [{ name: "tables" }] : [{ name: "tables" }, { name }],
           navDir: name === "tables" ? -1 : 1,
@@ -252,14 +253,16 @@ export const useApp = create<AppState>()((set, get) => {
     },
     canGoBack() {
       const s = get();
-      return !!s.dialog || s.agentOpen || s.sheetOpen || s.stack.length > 1;
+      return !!s.dialog || s.sheetOpen || s.stack.length > 1;
     },
     back() {
       const s = get();
       if (s.dialog) set({ dialog: null });
-      else if (s.agentOpen) set({ agentOpen: false });
       else if (s.sheetOpen) set({ sheetOpen: false });
-      else if (s.stack.length > 1) set({ stack: s.stack.slice(0, -1), navDir: -1, cashInput: "", activeSplit: 0 });
+      else if (s.stack.length > 1) {
+        const leavingAsk = currentRoute(s).name === "ask";
+        set({ stack: s.stack.slice(0, -1), navDir: -1, ...(leavingAsk ? {} : { cashInput: "", activeSplit: 0 }) });
+      }
       else return false;
       return true;
     },
@@ -283,8 +286,11 @@ export const useApp = create<AppState>()((set, get) => {
     setSheet(open) {
       set({ sheetOpen: open });
     },
-    setAgentOpen(open) {
-      set({ agentOpen: open, dialog: open ? null : get().dialog });
+    openAsk() {
+      const s = get();
+      if (currentRoute(s).name === "ask") return;
+      // Keep the table's state (active split) when asking from an order screen.
+      set({ stack: [...s.stack, { name: "ask" }], navDir: 1, dialog: null, sheetOpen: false });
     },
     openDialog(dialog) {
       set({ dialog });
@@ -378,8 +384,10 @@ export const useApp = create<AppState>()((set, get) => {
       const top = currentRoute(get());
       if (remaining.length === 0) {
         set({ justSettledTableId: tableId, cashInput: "", sheetOpen: false });
-        if (top.name === "order" && top.tableId === tableId) {
-          set({ stack: [{ name: "tables" }], navDir: -1, activeSplit: 0 });
+        // The table is settled: its order screen is no longer useful, wherever it is in the stack.
+        const stack = get().stack.filter((r) => !(r.name === "order" && r.tableId === tableId));
+        if (stack.length !== get().stack.length) {
+          set({ stack: stack.length ? stack : [{ name: "tables" }], navDir: top.name === "order" ? -1 : get().navDir, activeSplit: 0 });
         }
       } else {
         set({ activeSplit: 0, cashInput: "", sheetOpen: false });

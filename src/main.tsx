@@ -1,7 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { loadAppData, requestPersistentStorage } from "./data/db";
+import { loadAppData, loadChat, requestPersistentStorage, saveChat } from "./data/db";
+import { useAgent, type ChatMessage } from "./agent/agentStore";
 import { flushPersistence, useApp } from "./store/appStore";
 import "./styles.css";
 
@@ -20,8 +21,10 @@ function Boot({ error }: { error?: string }) {
 async function start() {
   root.render(<Boot />);
   try {
-    const { data, source } = await loadAppData();
+    const [{ data, source }, chat] = await Promise.all([loadAppData(), loadChat<ChatMessage>()]);
     useApp.getState().init(data);
+    useAgent.getState().hydrate(chat);
+    persistChat();
     if (source === "legacy") {
       useApp.getState().showToast({ text: "Your tables, menu and sales were carried over from the previous version.", tone: "success" });
     }
@@ -38,6 +41,16 @@ async function start() {
     </StrictMode>,
   );
   void requestPersistentStorage();
+}
+
+/** Saves the Ask Agent conversation shortly after it changes. */
+function persistChat() {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  useAgent.subscribe((s, prev) => {
+    if (s.messages === prev.messages) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void saveChat(useAgent.getState().messages).catch(() => {}), 400);
+  });
 }
 
 // Write pending changes before the app is backgrounded or closed.

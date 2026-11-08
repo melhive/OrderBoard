@@ -38,7 +38,6 @@ function start(opts: { accepted?: boolean } = {}) {
     stack: [{ name: "tables" }],
     dialog: null,
     sheetOpen: false,
-    agentOpen: false,
     activeSplit: 0,
     cashInput: "",
     undoStack: [],
@@ -110,7 +109,8 @@ describe("first launch", () => {
     click(button(/Agree and continue/));
     expect(useApp.getState().data.settings.acceptedLegalVersion).toBe(LEGAL_VERSION);
     expect(text()).not.toContain("Welcome to Order Board");
-    expect(text()).toContain("Empty · tap to start");
+    expect(byLabel("Table 1, empty")).toBeTruthy();
+    expect(text()).toContain("Available");
   });
 
   it("can open the Privacy Policy from the welcome screen and come back", async () => {
@@ -129,7 +129,7 @@ describe("taking and settling an order", () => {
 
   it("adds items, computes change, records the sale and returns to tables", async () => {
     click(byLabel("Table 1, empty"));
-    expect(text()).toContain("No items yet");
+    expect(text()).toContain("0 items");
     click(byLabel(/^Add Pares, ₱60/));
     click(byLabel(/^Add Pares, ₱60/));
     click(byLabel(/^Add Siomai, ₱25/));
@@ -140,10 +140,11 @@ describe("taking and settling an order", () => {
     ]);
     expect(byLabel(/^Add Pares, ₱60, 2 on bill/)).toBeTruthy();
 
+    click(byLabel("View bill"));
     type(byLabel("Cash received") as HTMLInputElement, "200");
-    expect(text()).toContain("Change ₱55");
+    expect(document.querySelector(".change")!.textContent).toBe("Change₱55");
     type(byLabel("Cash received") as HTMLInputElement, "100");
-    expect(text()).toContain("Short ₱45");
+    expect(document.querySelector(".change")!.textContent).toBe("Short₱45");
     type(byLabel("Cash received") as HTMLInputElement, "500");
 
     click(button(/Paid ₱145/));
@@ -153,7 +154,7 @@ describe("taking and settling an order", () => {
     expect(s.data.history[0]).toMatchObject({ table: 1, total: 145, cash: 500 });
     expect(s.stack).toEqual([{ name: "tables" }]);
     expect(text()).toContain("Table 1 paid ₱145 · change ₱355");
-    expect(text()).toContain("Today ₱145");
+    expect(document.querySelector(".today-card")!.textContent).toContain("₱145Sales today");
 
     // Undo from the toast puts the bill back.
     click(button("Undo"));
@@ -164,6 +165,7 @@ describe("taking and settling an order", () => {
   it("removes a line with the stepper and clears with confirmation", () => {
     click(byLabel("Table 2, empty"));
     click(byLabel(/^Add Water/));
+    click(byLabel("View bill"));
     click(byLabel("Remove one Water"));
     expect(useApp.getState().data.tables["2"]![0]!.items).toEqual([]);
     click(byLabel(/^Add Mami, ₱50/));
@@ -180,6 +182,7 @@ describe("taking and settling an order", () => {
     click(byLabel("Add a separate bill"));
     expect(useApp.getState().activeSplit).toBe(1);
     click(byLabel(/^Add Water/));
+    click(byLabel("View bill"));
     click(button(/Paid ₱20/));
     await wait(450);
     const d = useApp.getState().data;
@@ -191,7 +194,7 @@ describe("taking and settling an order", () => {
 
   it("adds a custom item", () => {
     click(byLabel("Table 4, empty"));
-    click(button("+ Custom item"));
+    click(byLabel("Add custom item"));
     type(document.getElementById("ci-name") as HTMLInputElement, "Extra sauce");
     type(document.getElementById("ci-price") as HTMLInputElement, "10");
     submitForm(document.getElementById("ci-name")!);
@@ -201,7 +204,7 @@ describe("taking and settling an order", () => {
   it("filters the menu with search", () => {
     click(byLabel("Table 1, empty"));
     type(byLabel("Search menu") as HTMLInputElement, "soda");
-    const tiles = [...document.querySelectorAll(".menu-tile:not(.custom)")].map((t) => t.querySelector(".name")!.textContent);
+    const tiles = [...document.querySelectorAll(".mtile")].map((t) => t.querySelector(".name")!.textContent);
     expect(tiles).toEqual(["Softdrinks"]);
   });
 });
@@ -282,7 +285,7 @@ describe("summary", () => {
 
   it("switches to a weekly view with a daily breakdown", () => {
     click(button("Summary"));
-    click(button("Week"));
+    click(button("This week"));
     expect(text()).toContain("Daily breakdown");
     expect(text()).toContain("This Week’s earnings");
   });
@@ -301,7 +304,7 @@ describe("settings and menu", () => {
 
   it("edits a menu item's price and nicknames", () => {
     click(byLabel("Settings"));
-    click(button(/Edit menu/));
+    click(button(/^Menu\d/));
     const row = [...document.querySelectorAll<HTMLButtonElement>(".mitem-main")].find((b) => b.textContent!.startsWith("Mami₱"))!;
     click(row);
     type(document.getElementById("mi-price") as HTMLInputElement, "55");
@@ -313,7 +316,7 @@ describe("settings and menu", () => {
 
   it("adds a category and an item in it", () => {
     click(byLabel("Settings"));
-    click(button(/Edit menu/));
+    click(button(/^Menu\d/));
     click(button(/Add category/));
     type(document.getElementById("cat-name") as HTMLInputElement, "Desserts");
     submitForm(document.getElementById("cat-name")!);
@@ -337,7 +340,7 @@ describe("Android back button", () => {
 
   it("closes a dialog first, then goes back a screen", () => {
     click(byLabel("Settings"));
-    click(button(/Edit menu/));
+    click(button(/^Menu\d/));
     click(button(/Add category/));
     expect(useApp.getState().dialog).not.toBeNull();
     pressBack();
@@ -372,14 +375,66 @@ describe("Ask Agent panel", () => {
     type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "table 1 paid 200");
     click(byLabel("Send"));
     expect(useApp.getState().data.history).toHaveLength(0);
-    click(document.querySelector<HTMLButtonElement>(".msg-actions .btn-primary")!);
+    click(document.querySelector<HTMLButtonElement>(".mactions .btn-primary")!);
     expect(useApp.getState().data.history[0]).toMatchObject({ table: 1, total: 120, cash: 200 });
   });
 
-  it("starter suggestions send a message", () => {
+  it("welcome cards send a message", () => {
     click(byLabel("Ask Agent"));
-    click(button("Which tables are open?"));
+    expect(text()).toContain("How can I help?");
+    click(button(/Today’s sales/));
     expect(useAgent.getState().messages).toHaveLength(2);
+    expect(text()).toContain("How much did we sell today?");
+  });
+
+  it("is a full screen that Back closes", () => {
+    click(byLabel("Ask Agent"));
+    expect(useApp.getState().stack.map((r) => r.name)).toEqual(["tables", "ask"]);
+    expect(document.querySelector(".bottomnav")).toBeNull();
+    click(byLabel(/^Back to/));
+    expect(useApp.getState().stack.map((r) => r.name)).toEqual(["tables"]);
+  });
+
+  it("knows the table it was opened from and returns to it", () => {
+    click(byLabel("Table 1, empty"));
+    click(byLabel("Ask Agent about this table"));
+    expect(text()).toContain("Helping with Table 1");
+    type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "2 pares and a water");
+    click(byLabel("Send"));
+    expect(useApp.getState().data.tables["1"]![0]!.items).toEqual([
+      { name: "Pares", price: 60, qty: 2 },
+      { name: "Water", price: 20, qty: 1 },
+    ]);
+    click(byLabel(/^Back to/));
+    expect(useApp.getState().stack.at(-1)).toEqual({ name: "order", tableId: 1 });
+  });
+
+  it("opens a table from a bill card", () => {
+    click(byLabel("Ask Agent"));
+    type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "1 siomai for table 3");
+    click(byLabel("Send"));
+    click(button("Open"));
+    expect(useApp.getState().stack.at(-1)).toEqual({ name: "order", tableId: 3 });
+  });
+
+  it("clears the chat after confirmation", () => {
+    click(byLabel("Ask Agent"));
+    type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "hello");
+    click(byLabel("Send"));
+    click(byLabel("Clear chat"));
+    click(document.querySelector<HTMLButtonElement>(".modal .btn-primary, [role=dialog] .btn-primary")!);
+    expect(useAgent.getState().messages).toHaveLength(0);
+  });
+
+  it("restores saved history with old buttons retired", () => {
+    useAgent.getState().hydrate([
+      { id: 5, ts: Date.now() - 3600e3, role: "user", text: "table 1 paid" },
+      { id: 6, ts: Date.now() - 3600e3, role: "agent", text: "Mark Table 1 as paid?", confirm: { yes: "Mark paid", state: "pending" }, undo: "available" },
+    ]);
+    click(byLabel("Ask Agent"));
+    expect(text()).toContain("Mark Table 1 as paid?");
+    expect(text()).toContain("No longer active");
+    expect(document.querySelector(".mactions")).toBeNull();
   });
 });
 

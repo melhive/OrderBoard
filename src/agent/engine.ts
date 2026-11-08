@@ -35,6 +35,8 @@ import type { AgentContext, AgentInput, AgentReply, Card, Line, Pending, Plan, W
 const CONTEXT_TTL_MS = 3 * 60 * 1000;
 const LOW_CONFIDENCE = 0.8;
 
+const PRICE_FILLER = new Set(["it", "its", "is", "the", "price", "pesos", "peso", "php", "each", "per", "piece", "for", "just", "only", "around", "about", "po", "lang", "na", "ay"]);
+
 const YES = new Set(["yes", "yeah", "yep", "yup", "sure", "confirm", "confirmed", "ok", "okay", "correct", "right", "proceed", "go", "do", "oo", "opo", "affirmative", "please"]);
 const NO = new Set(["no", "nope", "nah", "cancel", "stop", "dont", "wait", "hindi", "wrong", "negative"]);
 
@@ -140,11 +142,6 @@ function extractAmount(toks: string[], keywords: string[]): number | undefined {
   return undefined;
 }
 
-function firstNumber(toks: string[]): number | undefined {
-  const t = toks.find((x) => isNumberToken(x));
-  return t === undefined ? undefined : parseFloat(t);
-}
-
 function extractPeriod(toks: string[], norm: string, world: World): PeriodSpec | null {
   const today = businessDayKey(world.now, world.data.settings);
   const lastN = /\b(?:last|past) (\d+) days?\b/.exec(norm);
@@ -239,6 +236,7 @@ function billCard(world: World, tableId: number, split: number, added: Line[] = 
     kind: "bill",
     title: `${tableName(world.data, tableId)}${multi ? ` · Split ${split + 1}` : ""}`,
     lines: kept,
+    tableId,
     total: kept.reduce((s, l) => s + l.price * l.qty, 0),
     highlight: added.map((a) => a.name),
   };
@@ -298,8 +296,11 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
       return respond(raw, world, cleared);
     }
     if (pending.kind === "needPrice") {
-      const price = firstNumber(toks);
-      if (price !== undefined && toks.length <= 4) {
+      // Only a bare price ("50", "₱50", "it's 50 pesos") answers the question;
+      // anything else is a new request and the question is dropped.
+      const rest = toks.filter((t) => !PRICE_FILLER.has(t));
+      const price = rest.length === 1 && isNumberToken(rest[0]) && parseFloat(rest[0]!) > 0 ? parseFloat(rest[0]!) : undefined;
+      if (price !== undefined) {
         const line: Line = { name: titleCase(pending.name), price, qty: pending.qty };
         const plan: Plan = { kind: "addItems", tableId: pending.tableId, split: pending.split, items: [line] };
         return {
@@ -321,6 +322,10 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
 
   const data = world.data;
   const index = menuIndex(data);
+
+  if (toks.length <= 3 && toks.every((t) => YES.has(t) || NO.has(t) || t === "po")) {
+    return { reply: { text: "There’s nothing waiting for a yes or no right now. Tell me an order, or ask about a table or your sales.", suggestions: ["Which tables are open?", "Sales today"] }, ctx };
+  }
 
   // ----- social / meta -----
   if (/^(hi|hello|hey|hiya|yo|good (morning|afternoon|evening)|kumusta|musta)\b/.test(norm) && toks.length <= 4) {
@@ -415,7 +420,8 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
     }
     return { reply: { text: "What should the new table be called? Say for example “add table Takeout”." }, ctx };
   }
-  if (has(toks, "remove", "delete") && has(toks, "table") && !parseItems(extractTable(toks, data).rest, index).lines.length) {
+  const TABLE_ADMIN_WORDS = new Set(["remove", "delete", "the", "a", "table", "please", "po", "custom", "this", "that"]);
+  if (has(toks, "remove", "delete") && has(toks, "table") && extractTable(toks, data).rest.every((t) => TABLE_ADMIN_WORDS.has(t))) {
     const ref = extractTable(toks, data);
     if (ref.tableId === null) return { reply: { text: "Which table should I remove?", suggestions: data.tableList.filter((t) => t.custom).map((t) => `Remove table ${t.name}`) }, ctx };
     const t = data.tableList.find((x) => x.id === ref.tableId)!;
@@ -432,6 +438,23 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   const explicitTable = ref.tableId;
   const rest = ref.rest;
   const restNorm = rest.join(" ");
+
+  // ----- move a bill to another table: "move table 2 to table 4" -----
+  if (has(toks, "move", "transfer", "lipat") && explicitTable !== null) {
+    const to = secondTable(rest, data, explicitTable);
+    if (to === null) {
+      return askTable(ctx, world, `Move ${tableName(data, explicitTable)}’s bill to which table?`, (tid, w, c) => moveReply(w, explicitTable, tid, c).reply);
+    }
+    return moveReply(world, explicitTable, to, rememberTable(ctx, to, world));
+  }
+
+  // ----- change for an amount: "change for 500 on table 2", "sukli sa 1000" -----
+  if (has(toks, "change") && !has(toks, "price", "menu", "theme", "name", "hours", "mode", "to", "cost") && rest.some(isNumberToken)) {
+    const cash = Math.max(...rest.filter(isNumberToken).map(Number));
+    const tableId = explicitTable ?? contextTable(world, ctx);
+    if (tableId === null) return askTable(ctx, world, `Change from ${peso(cash)} for which table?`, (tid, w) => changeReply(w, tid, cash));
+    return { reply: changeReply(world, tableId, cash), ctx: rememberTable(ctx, tableId, world) };
+  }
 
   // ----- open a table's order screen: "open table 3", "go to takeout" -----
   if (explicitTable !== null && /^(open|go to|go|take me to|switch to|bring up)\b/.test(norm) && !parseItems(rest, index).lines.length) {
@@ -524,7 +547,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   }
 
   // ----- repeat: "another one", "same again", "same for table 4" -----
-  const isRepeat = /^(another one|one more|same again|again|same|same order|repeat|repeat that|same for|same thing)\b/.test(restNorm) || hasPhrase(norm, "same for", "same order for", "same thing for");
+  const isRepeat = /^(another (?:one|1)|(?:one|1) more|same again|again|same|same order|repeat|repeat that|same for|same thing)\b/.test(restNorm) || hasPhrase(norm, "same for", "same order for", "same thing for");
   if (isRepeat && ctx.lastLines.length) {
     const tableId = explicitTable ?? contextTable(world, ctx);
     if (tableId === null) return askTable(ctx, world, "Which table is that for?", (tid, w, c) => addReply(w, c, tid, ctx.lastLines, []).reply);
@@ -533,15 +556,20 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
 
   // ----- add items (the default) -----
   const parsed = parseItems(rest, index);
-  if (parsed.lines.length || (parsed.unknown.length && (explicitTable !== null || has(toks, "add", "order")))) {
+  // An unknown phrase only becomes a custom-item offer when it clearly is an
+  // order: a short name with a quantity or an "add/order" verb.
+  const orderish = parsed.unknownItems.length === 1 && parsed.unknownItems[0]!.text.split(" ").length <= 3 &&
+    (parsed.unknownItems[0]!.explicitQty || has(toks, "add", "order", "give", "get", "want") ||
+      (explicitTable !== null && !has(toks, "what", "how", "why", "when", "where", "who", "which", "whats")));
+  if (parsed.lines.length || orderish) {
     const lines = parsed.lines.map(toLine);
     const lowConfidence = parsed.lines.filter((l) => l.confidence < LOW_CONFIDENCE);
     const tableId = explicitTable ?? contextTable(world, ctx);
     if (tableId === null) {
       return askTable(ctx, world, lines.length ? `Which table is ${linesText(lines)} for?` : "Which table is this for?", (tid, w, c) =>
-        addReply(w, c, tid, lines, parsed.unknown, lowConfidence).reply);
+        addReply(w, c, tid, lines, parsed.unknown, lowConfidence, parsed.unknownItems[0]?.qty ?? 1).reply);
     }
-    return addReply(world, rememberTable(ctx, tableId, world), tableId, lines, parsed.unknown, lowConfidence);
+    return addReply(world, rememberTable(ctx, tableId, world), tableId, lines, parsed.unknown, lowConfidence, parsed.unknownItems[0]?.qty ?? 1);
   }
 
   // ----- nothing matched -----
@@ -557,7 +585,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   }
   return {
     reply: {
-      text: "Sorry, I didn’t catch that. You can say an order like “2 mami and a water for table 1”, or ask “how much did we sell today?”.",
+      text: "Sorry, I didn’t understand that. Try an order like “2 mami and a water for table 1”, or a question like “how much did we sell today?”.",
       suggestions: ["What can you do?", "Which tables are open?", "Show the menu"],
       tone: "warn",
     },
@@ -598,7 +626,7 @@ function confirmReply(ctx: AgentContext, plan: Plan, question: string, yes: stri
   };
 }
 
-function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[], unknown: string[], lowConfidence: ParsedLine[] = []): RespondResult {
+function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[], unknown: string[], lowConfidence: ParsedLine[] = [], unknownQty = 1): RespondResult {
   const data = world.data;
   const split = splitFor(world, tableId);
   const name = tableName(data, tableId);
@@ -607,7 +635,7 @@ function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[
   if (!lines.length) {
     const u = unknown[0]!;
     const sug = suggestItems(u, menuIndex(data));
-    nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: u, qty: 1, tableId, split } };
+    nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: u, qty: unknownQty, tableId, split } };
     return {
       reply: {
         text: `“${u}” isn’t on the menu.${sug.length ? ` Did you mean ${sug.map((s) => s.name).join(" or ")}?` : ""} To add it as a custom item, tell me its price.`,
@@ -634,7 +662,7 @@ function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[
     const r = confirmReply(nextCtx, plan, q, "Add to bill", text, true, card);
     return { reply: { ...r.reply, speak: `Add ${spokenLines(lines)} to ${name}?` }, ctx: r.ctx };
   }
-  if (unknown.length === 1) nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: unknown[0]!, qty: 1, tableId, split } };
+  if (unknown.length === 1 && unknown[0]!.split(" ").length <= 3) nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: unknown[0]!, qty: unknownQty, tableId, split } };
   return { reply: { text, speak, execute: plan, undoable: true, card }, ctx: nextCtx };
 }
 
@@ -704,6 +732,100 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
   };
   return confirmReply(ctx, { kind: "pay", tableId, splits: chosen, cash }, `Mark ${name}${splitText} as paid? Total ${peso(total)}.${changeText}`,
     "Mark paid", `${name}${splitText} paid — ${peso(total)} recorded.${changeText}`, false, card);
+}
+
+function secondTable(rest: string[], data: AppData, from: number): number | null {
+  const ref = extractTable(rest, data);
+  if (ref.tableId !== null && ref.tableId !== from) return ref.tableId;
+  // "move table 2 to 4": the second table without the word "table"
+  for (let i = 0; i < rest.length - 1; i++) {
+    if (!["to", "into", "sa", "onto", "with"].includes(rest[i]!)) continue;
+    const name = rest[i + 1]!;
+    const tb = data.tableList.find((t) => t.id !== from && prepareTokens(t.name).join(" ") === name);
+    if (tb) return tb.id;
+  }
+  return null;
+}
+
+function moveReply(world: World, from: number, to: number, ctx: AgentContext): RespondResult {
+  const data = world.data;
+  if (!data.tableList.some((t) => t.id === to)) return { reply: { text: "That table doesn’t exist.", tone: "warn" }, ctx };
+  if (from === to) return { reply: { text: "That’s the same table." }, ctx };
+  const bills = (data.tables[from] ?? []).filter((s) => s.items.length);
+  if (!bills.length) return { reply: { text: `${tableName(data, from)} has no open bill to move.`, tone: "warn" }, ctx };
+  const total = bills.reduce((s, b) => s + splitTotal(b), 0);
+  const targetBusy = (data.tables[to] ?? []).some((s) => s.items.length);
+  return confirmReply(ctx, { kind: "moveTable", from, to },
+    `Move ${tableName(data, from)}’s ${bills.length > 1 ? `${bills.length} bills` : "bill"} (${peso(total)}) to ${tableName(data, to)}?${targetBusy ? ` ${tableName(data, to)} already has a bill; it will be kept as a separate split.` : ""}`,
+    "Move bill", `Moved to ${tableName(data, to)}.`, true,
+    { kind: "bill", title: `${tableName(data, from)} → ${tableName(data, to)}`, lines: bills.flatMap((b) => b.items), total, tableId: to });
+}
+
+function changeReply(world: World, tableId: number, cash: number): AgentReply {
+  const data = world.data;
+  const name = tableName(data, tableId);
+  const splits = (data.tables[tableId] ?? []).filter((s) => s.items.length);
+  if (!splits.length) return { text: `${name} has no open bill.`, tone: "warn" };
+  const split = splitFor(world, tableId);
+  const total = splits.length > 1 ? splitTotal((data.tables[tableId] ?? [])[split]) || splitTotal(splits[0]) : splitTotal(splits[0]);
+  const diff = cash - total;
+  const text = diff >= 0 ? `${name} total is ${peso(total)}. From ${peso(cash)}, the change is ${peso(diff)}.` : `${name} total is ${peso(total)}. ${peso(cash)} is short by ${peso(-diff)}.`;
+  return {
+    text,
+    speak: diff >= 0 ? `Change is ${pesoSpoken(diff)}.` : `Short by ${pesoSpoken(-diff)}.`,
+    tone: diff >= 0 ? undefined : "warn",
+    suggestions: diff >= 0 ? [`${name} paid ${cash}`] : [],
+  };
+}
+
+function compareReply(toks: string[], world: World): AgentReply {
+  const data = world.data;
+  const today = businessDayKey(world.now, data.settings);
+  let a: PeriodSpec;
+  let b: PeriodSpec;
+  let aName: string;
+  let bName: string;
+  if (has(toks, "month", "monthly")) {
+    const d = parseISODate(today);
+    const iso = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+    a = { period: "month" };
+    b = { period: "custom", from: iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)), to: iso(new Date(d.getFullYear(), d.getMonth(), 0)) };
+    aName = "This month";
+    bName = "Last month";
+  } else if (has(toks, "week", "weekly")) {
+    const dow = (parseISODate(today).getDay() + 6) % 7;
+    const mon = addDays(today, -dow);
+    a = { period: "week" };
+    b = { period: "custom", from: addDays(mon, -7), to: addDays(mon, -1) };
+    aName = "This week";
+    bName = "Last week";
+  } else {
+    a = { period: "today" };
+    b = { period: "custom", from: addDays(today, -1), to: addDays(today, -1) };
+    aName = "Today";
+    bName = "Yesterday";
+  }
+  const sa = summarize(txnsForPeriod(data.history, a, data.settings, world.now));
+  const sb = summarize(txnsForPeriod(data.history, b, data.settings, world.now));
+  const diff = sa.total - sb.total;
+  const pct = sb.total > 0 ? Math.round((diff / sb.total) * 100) : null;
+  const trend = diff === 0 ? "the same as" : `${peso(Math.abs(diff))} ${diff > 0 ? "more than" : "less than"}`;
+  return {
+    text: `${aName}: ${peso(sa.total)} (${plural(sa.orders, "order")}). ${bName}: ${peso(sb.total)} (${plural(sb.orders, "order")}). That’s ${trend} ${bName.toLowerCase()}${pct !== null && diff !== 0 ? ` (${diff > 0 ? "+" : "−"}${Math.abs(pct)}%)` : ""}.`,
+    card: {
+      kind: "stats",
+      title: `${aName} vs ${bName.toLowerCase()}`,
+      stats: [
+        { label: aName, value: peso(sa.total) },
+        { label: bName, value: peso(sb.total) },
+        { label: "Change", value: pct === null ? (diff ? peso(diff) : "—") : `${diff >= 0 ? "+" : "−"}${Math.abs(pct)}%` },
+      ],
+      rows: [
+        { label: "Orders", value: `${sa.orders} vs ${sb.orders}` },
+        { label: "Avg order", value: `${peso(sa.orders ? sa.total / sa.orders : 0)} vs ${peso(sb.orders ? sb.total / sb.orders : 0)}` },
+      ],
+    },
+  };
 }
 
 function splitReply(world: World, tableId: number): AgentReply {
@@ -797,6 +919,51 @@ function menuManagement(raw: string, toks: string[], norm: string, world: World,
 function queries(raw: string, toks: string[], norm: string, rest: string[], explicitTable: number | null, world: World, ctx: AgentContext, index: MenuIndex): RespondResult | null {
   const data = world.data;
   const question = has(toks, "what", "how", "which", "who", "show", "list", "tell", "check", "whats", "any", "is", "are", "do", "did", "much", "many") || raw.trim().endsWith("?");
+
+  // Comparisons: "compare today and yesterday", "this week vs last week"
+  if (has(toks, "compare", "compared", "vs", "versus") || hasPhrase(norm, "than yesterday", "than last week", "better than", "worse than")) {
+    return { reply: compareReply(toks, world), ctx };
+  }
+
+  // Average order value
+  if (has(toks, "average", "avg", "aov") || hasPhrase(norm, "per order", "per customer")) {
+    const spec = extractPeriod(toks, norm, world) ?? { period: "today" };
+    const s = summarize(txnsForPeriod(data.history, spec, data.settings, world.now));
+    const when = periodPhrase(spec, world);
+    if (!s.orders) return { reply: { text: `No paid orders ${when} yet.` }, ctx };
+    return {
+      reply: {
+        text: `Average order ${when}: ${peso(s.total / s.orders)} across ${plural(s.orders, "order")}, about ${(s.itemsSold / s.orders).toFixed(1)} items each.`,
+        card: { kind: "stats", title: `Averages · ${when}`, stats: [{ label: "Avg order", value: peso(s.total / s.orders) }, { label: "Orders", value: String(s.orders) }, { label: "Items/order", value: (s.itemsSold / s.orders).toFixed(1) }] },
+      },
+      ctx,
+    };
+  }
+
+  // Busiest hours: "what time is busiest", "peak hour"
+  if (has(toks, "busiest", "peak", "rush") || hasPhrase(norm, "busy hours", "busiest time", "what time do we sell")) {
+    const spec = extractPeriod(toks, norm, world) ?? { period: "custom", from: addDays(businessDayKey(world.now, data.settings), -29), to: businessDayKey(world.now, data.settings) };
+    const txns = txnsForPeriod(data.history, spec, data.settings, world.now);
+    if (!txns.length) return { reply: { text: "There aren’t enough sales yet to find your busiest hours." }, ctx };
+    const byHour = new Map<number, { orders: number; total: number }>();
+    for (const h of txns) {
+      const hr = new Date(h.ts).getHours();
+      const b = byHour.get(hr) ?? { orders: 0, total: 0 };
+      b.orders++;
+      b.total += h.total;
+      byHour.set(hr, b);
+    }
+    const ranked = [...byHour.entries()].sort((a, b) => b[1].orders - a[1].orders || b[1].total - a[1].total);
+    const label = (hr: number) => `${formatMinutesAsTime(hr * 60).replace(":00", "")}–${formatMinutesAsTime(((hr + 1) % 24) * 60).replace(":00", "")}`;
+    const when = spec.period === "custom" && spec.from !== spec.to && !extractPeriod(toks, norm, world) ? "over the last 30 days" : periodPhrase(spec, world);
+    return {
+      reply: {
+        text: `Your busiest hour ${when} is ${label(ranked[0]![0])} with ${plural(ranked[0]![1].orders, "order")}.`,
+        card: { kind: "list", title: `Busiest hours · ${when}`, rows: ranked.slice(0, 5).map(([hr, b]) => ({ label: label(hr), value: peso(b.total), sub: plural(b.orders, "order") })) },
+      },
+      ctx,
+    };
+  }
 
   // Open / unpaid tables
   if ((has(toks, "open", "unpaid", "occupied", "pending", "active", "busy") && has(toks, "table", "tables", "bills", "bill", "orders", "order")) || hasPhrase(norm, "who has not paid", "who hasnt paid", "not paid yet", "still open", "outstanding")) {
@@ -989,7 +1156,10 @@ function helpReply(): AgentReply {
         { label: "“what’s on table 1?” · “which tables are open?”", sub: "Check bills" },
         { label: "“how much did we sell today?” · “best seller this week”", sub: "Sales answers" },
         { label: "“change the price of mami to 55”", sub: "Edit the menu" },
-        { label: "“split table 2” · “add table Takeout”", sub: "Manage tables and bills" },
+        { label: "“change for 500 on table 2”", sub: "Work out change before paying" },
+        { label: "“move table 2 to table 4” · “split table 2”", sub: "Move or split bills" },
+        { label: "“compare today and yesterday” · “busiest hour”", sub: "Insights on your sales" },
+        { label: "“dalawang pares, table 3” · “magkano table 1?”", sub: "Taglish works too" },
         { label: "“export today’s report as pdf” · “undo”", sub: "Reports and corrections" },
       ],
     },

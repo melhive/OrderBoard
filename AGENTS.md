@@ -21,8 +21,9 @@ Currency is PHP (₱), shown as whole pesos via `peso()`.
 ## History and versions
 
 - **v1–v15** (`legacy/index.html`, `legacy/sw.js`): a single hand-written HTML file storing everything in `localStorage` under `order_board_streetfood_v1`. It is kept **only as a behavioural reference**: don't edit it or ship it.
-- **v16** (this codebase, branch `feature/react-rebuild`): React + TypeScript rebuild. Same features, a new design, IndexedDB storage, Ask Agent, voice, Android back button, legal screens.
-- The version shown in the app is the **major** of `package.json` `version` (`16.0.0` → "v16"). When you ship user-visible changes, bump it and add an entry at the top of `CHANGELOG` in `src/data/changelog.ts`.
+- **v16** (this codebase, merged to `main`): React + TypeScript rebuild. Same features, a new design, IndexedDB storage, Ask Agent, voice, Android back button, legal screens.
+- **v17**: UI redesign (new logo/icons, grouped settings, order screen with sticky categories and a cart bar), Ask Agent as a full chat screen with saved history, and more agent abilities (Taglish, move table, change calculation, comparisons).
+- The version shown in the app is the **major** of `package.json` `version` (`17.0.0` → "v17"). When you ship user-visible changes, bump it and add an entry at the top of `CHANGELOG` in `src/data/changelog.ts`.
 
 ## Stack and commands
 
@@ -70,7 +71,7 @@ src/agent/
   menuMatch.ts, text.ts    tokenizing, number words, fuzzy/phonetic menu matching, mishearing synonyms
   executor.ts              applies a Plan to the store (checkpoint first → undoable)
   agentStore.ts            chat messages + conversation context
-  AgentPanel.tsx           chat UI, voice push-to-talk, confirmation/undo buttons, FAB
+  AskScreen.tsx            full-screen chat (route "ask"): scrollable saved history, cards, voice, confirm/undo
 src/screens/               Tables, Order, Summary, Settings, MenuEditor, InfoScreens (changelog/about/legal/welcome)
 src/ui/                    components (TopBar, BottomNav, Switch, Segmented, Toast), Dialogs, Icons, hooks
 src/legal/content.ts       Privacy Policy + Terms text, LEGAL_VERSION
@@ -79,15 +80,17 @@ legacy/                    v15 single-file app (reference only)
 
 ## How it works
 
-**State.** One Zustand store (`useApp`) holds `data: AppData` (persisted) plus UI state: the route `stack`, `dialog`, `sheetOpen`, `agentOpen`, `activeSplit`, `cashInput`, `summary` period, `toast` and `undoStack`. Components read with selectors (`useApp(s => s.x)`) and call actions via `useApp.getState().action()`.
+**State.** One Zustand store (`useApp`) holds `data: AppData` (persisted) plus UI state: the route `stack`, `dialog`, `sheetOpen`, `activeSplit`, `cashInput`, `summary` period, `toast` and `undoStack`. Components read with selectors (`useApp(s => s.x)`) and call actions via `useApp.getState().action()`.
 
 **Persistence.** Every data change goes through `setData(fn)`, which treats data immutably (always return new objects). It diffs prev/next: workspace changes (everything except history) are saved as one record, debounced by 120 ms. History rows are put or deleted individually. `flushPersistence()` runs on `visibilitychange: hidden` and `pagehide`. The first launch of v16 migrates the legacy `localStorage` data and keeps a renamed `_migrated` copy as a safety net.
 
-**Navigation.** `stack` is a list of routes. `push`, `back`, `goTab` and `openTable` manage it, and `navDir` drives the slide direction. `useBackButton` (`src/ui/hooks.ts`) maps the Android/browser back button to `store.back()` through a guard history entry. `back()` closes, in order: dialog → agent panel → bill sheet → screen.
+**Navigation.** `stack` is a list of routes. `push`, `back`, `goTab` and `openTable` manage it, and `navDir` drives the slide direction. `useBackButton` (`src/ui/hooks.ts`) maps the Android/browser back button to `store.back()` through a guard history entry. `back()` closes, in order: dialog → bill sheet → screen. Ask Agent is a normal route (`openAsk()` pushes `{ name: "ask" }`), so Back leaves the chat and returns to the screen it was opened from.
 
 **Rendering gotcha.** Screens are wrapped in a transforming `motion.div` for transitions, and a transformed ancestor breaks `position: fixed`. That's why `BottomNav` is rendered in `App` (not inside screens) and the bill sheet is portaled to `document.body`. Keep new fixed-position layers outside the screen wrapper too.
 
 **Ask Agent.** `engine.respond()` is pure and takes a `World` snapshot. It returns text, an optional card (bill/stats/list), and either `execute` (applied immediately; used for safe, undoable things like adding items) or `confirm` (payments, clearing, menu/settings edits wait for a Yes). The executor checkpoints before every mutation, so Undo restores exactly. Context remembers the last table for 3 minutes ("and a water", "same for table 4"). Low-confidence matches always ask first. The agent **refuses to delete or reset sales records**; those need the human code-confirmation flow in Summary.
+
+**Ask screen.** When opened from an order screen, `worldSnapshot()` looks below the `ask` route, so that table is the current table. Chat history (last 200 messages) is saved in Dexie `kv["chat"]` (`loadChat`/`saveChat` in `db.ts`, debounced in `main.tsx`) and restored with `useAgent.hydrate()`, which retires stale Yes/Undo buttons. It is not part of the full backup. This is disclosed in the Privacy Policy.
 
 **Voice.** `platform/voice.ts` uses the Web Speech API (en-PH, falls back to en-US). Chrome on Android needs internet for recognition (Google service); typing always works offline. Text-to-speech is optional (`settings.agent.voiceReplies`). Hands-free mode re-listens after each spoken reply.
 
@@ -122,6 +125,8 @@ Run `pnpm test && pnpm typecheck` before declaring anything done.
 ## Before publishing (open items)
 
 - [ ] `src/legal/content.ts`: set real `PUBLISHER` and `CONTACT_EMAIL` (currently `support@example.com`), have the text reviewed, and host the Privacy Policy at a public URL (needed for a Play Store listing).
-- [ ] Merge `feature/react-rebuild` → `main` to deploy. Before that, test on the actual phone: install over the existing v15 PWA and confirm data migrates, offline works, and the update reloads.
+- [x] v16 merged to `main` (PR #1).
+- [ ] Switch the repo's Pages source to "GitHub Actions" and re-run the deploy, if not done yet.
+- [ ] Test on the actual phone: install over the existing v15 PWA and confirm data migrates, offline works, the update reloads, and the Ask chat survives an app restart.
 - [ ] Optional: Play Store via Capacitor. Swap the adapters in `src/platform/` (files → @capacitor/filesystem + share, haptics → @capacitor/haptics, voice → @capacitor-community/speech-recognition + text-to-speech, because the Android WebView has no SpeechRecognition). Nothing outside `platform/` should need to change.
 - [ ] Optional: bundle size (~495 KB JS, ~163 KB gzip, mostly React + motion) could shrink with `LazyMotion`. It's fine for a precached PWA.

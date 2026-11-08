@@ -2,7 +2,7 @@ import { AnimatePresence, MotionConfig, motion, type Variants } from "motion/rea
 import { useEffect, useLayoutEffect } from "react";
 import { currentRoute, useApp, type Route } from "./store/appStore";
 import { LEGAL_VERSION } from "./legal/content";
-import { AgentFab, AgentPanel } from "./agent/AgentPanel";
+import { AskScreen } from "./agent/AskScreen";
 import { TablesScreen } from "./screens/TablesScreen";
 import { OrderScreen } from "./screens/OrderScreen";
 import { SummaryScreen } from "./screens/SummaryScreen";
@@ -22,6 +22,7 @@ function Screen({ route }: { route: Route }) {
     case "tables": return <TablesScreen />;
     case "order": return <OrderScreen tableId={route.tableId} />;
     case "summary": return <SummaryScreen />;
+    case "ask": return <AskScreen />;
     case "settings": return <SettingsScreen />;
     case "menu": return <MenuEditorScreen />;
     case "changelog": return <ChangelogScreen />;
@@ -30,12 +31,12 @@ function Screen({ route }: { route: Route }) {
   }
 }
 
-// Screens slide in from the side they "come from": forward pushes from the
-// right, back reveals from the left.
+// Short, light transitions: the new screen eases in from the side it comes
+// from; the old one just fades. Quick enough to never feel like a delay.
 const slide: Variants = {
-  enter: (dir: number) => ({ x: dir > 0 ? "28%" : "-18%", opacity: 0 }),
-  center: { x: 0, opacity: 1, transition: { type: "spring", stiffness: 420, damping: 40, mass: 0.8 } },
-  exit: (dir: number) => ({ x: dir > 0 ? "-18%" : "28%", opacity: 0, transition: { duration: 0.18, ease: "easeIn" } }),
+  enter: (dir: number) => ({ x: dir > 0 ? 28 : -28, opacity: 0 }),
+  center: { x: 0, opacity: 1, transition: { duration: 0.22, ease: [0.2, 0.8, 0.2, 1] } },
+  exit: { opacity: 0, transition: { duration: 0.1, ease: "linear" } },
 };
 
 export function App() {
@@ -55,7 +56,7 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const s = useApp.getState();
-      if (s.dialog || s.agentOpen || s.sheetOpen) s.back();
+      if (s.dialog || s.sheetOpen) s.back();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -72,8 +73,6 @@ export function App() {
           </motion.div>
         </AnimatePresence>
         {showNav && <BottomNav />}
-        <AgentFab />
-        <AgentPanel />
         <DialogHost />
         <ToastHost />
         <AnimatePresence>{needsGate && route.name !== "legal" && <WelcomeGate key="gate" />}</AnimatePresence>
