@@ -126,7 +126,7 @@ Run `pnpm test && pnpm typecheck` before declaring anything done.
 
 - [ ] `src/legal/content.ts`: set real `PUBLISHER` and `CONTACT_EMAIL` (currently `support@example.com`), have the text reviewed, and host the Privacy Policy at a public URL (needed for a Play Store listing).
 - [x] v16 merged to `main` (PR #1).
-- [ ] Switch the repo's Pages source to "GitHub Actions" and re-run the deploy, if not done yet.
+- [x] Pages source set to "GitHub Actions" (2026-11-08); every push to `main` now deploys.
 - [ ] Test on the actual phone: install over the existing v15 PWA and confirm data migrates, offline works, the update reloads, and the Ask chat survives an app restart.
 - [ ] Optional: Play Store via Capacitor. Swap the adapters in `src/platform/` (files → @capacitor/filesystem + share, haptics → @capacitor/haptics, voice → @capacitor-community/speech-recognition + text-to-speech, because the Android WebView has no SpeechRecognition). Nothing outside `platform/` should need to change.
 - [ ] Optional: bundle size (~495 KB JS, ~163 KB gzip, mostly React + motion) could shrink with `LazyMotion`. It's fine for a precached PWA.
