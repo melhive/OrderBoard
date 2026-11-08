@@ -18,6 +18,7 @@ export interface ChatMessage {
   suggestions?: string[];
   tone?: AgentReply["tone"];
   via?: "voice" | "text";
+  link?: AgentReply["link"];
 }
 
 interface AgentState {
@@ -38,7 +39,7 @@ const MAX_MESSAGES = 200;
 export function worldSnapshot(): World {
   const s = useApp.getState();
   // The chat opens on top of an order screen: that table is still "current".
-  const r = [...s.stack].reverse().find((x) => x.name !== "ask") ?? currentRoute(s);
+  const r = [...s.stack].reverse().find((x) => x.name !== "ask" && x.name !== "talk") ?? currentRoute(s);
   return {
     data: s.data,
     currentTableId: r.name === "order" ? r.tableId : null,
@@ -72,6 +73,7 @@ export const useAgent = create<AgentState>()((set, get) => {
       undo,
       suggestions: reply.suggestions,
       tone: reply.tone,
+      link: reply.link,
     };
     set({ ctx, messages: [...messages, msg].slice(-MAX_MESSAGES) });
     return { ...reply, text };

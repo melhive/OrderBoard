@@ -3,8 +3,9 @@
 
 import { create } from "zustand";
 import { deleteTxns, putTxn, replaceAll, saveWorkspace, workspaceOf } from "../data/db";
-import type { AppData, MenuItem, Period, Settings, ThemePref, Txn } from "../data/types";
+import type { AppData, MenuItem, MoneyMethod, OrderItem, Period, Settings, Split, ThemePref, Txn } from "../data/types";
 import { addToItems, splitTotal, tableDisplayName } from "../lib/bill";
+import { allocateUtangPayment, findAccount } from "../lib/money";
 import { businessDayKey, type PeriodSpec } from "../lib/businessDay";
 import { generateVerifyCode } from "../lib/format";
 import { haptic, setHapticsEnabled } from "../platform/haptics";
@@ -16,6 +17,8 @@ export type Route =
   | { name: "order"; tableId: number }
   | { name: "summary" }
   | { name: "ask" }
+  | { name: "talk" }
+  | { name: "utang" }
   | { name: "settings" }
   | { name: "menu" }
   | { name: "changelog" }
@@ -36,7 +39,10 @@ export type Dialog =
   | { type: "menu-item-form"; catId: number; itemId: number | null }
   | { type: "confirm-restore-backup"; pending: AppData }
   | { type: "import-error" }
-  | { type: "confirm-clear-chat" };
+  | { type: "confirm-clear-chat" }
+  | { type: "item-note"; tableId: number; split: number; itemIdx: number }
+  | { type: "add-expense" }
+  | { type: "utang-pay"; customer: string };
 
 export interface Toast {
   id: number;
@@ -58,6 +64,10 @@ interface UIState {
   sheetOpen: boolean;
   activeSplit: number;
   cashInput: string;
+  /** How the bill on the order screen will be settled. */
+  payMethod: MoneyMethod | "utang";
+  /** Customer name when charging to utang. */
+  utangName: string;
   summary: PeriodSpec;
   expandedTxnId: number | null;
   expandedDayKey: string | null;
@@ -81,6 +91,8 @@ export interface AppState extends UIState {
   setSheet(open: boolean): void;
   /** Opens the Ask Agent screen on top of the current one. */
   openAsk(): void;
+  /** Opens hands-free Talk mode on top of the current screen. */
+  openTalk(): void;
   openDialog(d: Dialog): void;
   closeDialog(): void;
   showToast(t: Omit<Toast, "id">): void;
@@ -89,13 +101,22 @@ export interface AppState extends UIState {
   // orders
   setActiveSplit(i: number): void;
   setCashInput(v: string): void;
-  addItem(tableId: number, name: string, price: number, qty?: number, splitIdx?: number): void;
+  setPayMethod(m: MoneyMethod | "utang"): void;
+  setUtangName(v: string): void;
+  addItem(tableId: number, name: string, price: number, qty?: number, splitIdx?: number, note?: string): void;
+  setItemNote(tableId: number, splitIdx: number, itemIdx: number, note: string): void;
+  /** Marks a line fully served (or not served). */
+  setServed(tableId: number, splitIdx: number, itemIdx: number, served: boolean): void;
+  /** Marks everything served on one bill, or on all bills of the table. */
+  serveAll(tableId: number, splitIdx?: number): void;
   changeQty(tableId: number, splitIdx: number, itemIdx: number, delta: number): void;
   setLineQty(tableId: number, splitIdx: number, name: string, qty: number): void;
   addSplit(tableId: number): number;
   removeSplit(tableId: number, idx: number): void;
   clearSplit(tableId: number, splitIdx: number): void;
-  markPaid(tableId: number, splitIdx: number, cash?: number): Txn | null;
+  markPaid(tableId: number, splitIdx: number, cash?: number, opts?: { method?: MoneyMethod | "utang"; customer?: string }): Txn | null;
+  /** Records a payment toward someone's utang (oldest first). Returns the amount applied. */
+  payUtang(customer: string, amount: number, method: MoneyMethod): number;
   addTable(name: string): number;
   removeTable(id: number): void;
 
@@ -106,10 +127,18 @@ export interface AppState extends UIState {
   deleteMenuItem(catId: number, itemId: number): void;
   moveCategory(from: number, to: number): void;
   moveMenuItem(catId: number, from: number, to: number): void;
+  setSoldOut(catId: number, itemId: number, soldOut: boolean): void;
+
+  // expenses
+  addExpense(amount: number, what: string): number;
+  deleteExpense(id: number): void;
 
   // settings
   updateSettings(patch: Partial<Settings>): void;
   setTheme(t: ThemePref): void;
+  /** Called after a full backup is exported. */
+  noteBackup(): void;
+  snoozeBackup(days: number): void;
 
   // history
   setPeriod(p: Period): void;
@@ -196,6 +225,8 @@ const initialUI: UIState = {
   sheetOpen: false,
   activeSplit: 0,
   cashInput: "",
+  payMethod: "cash",
+  utangName: "",
   summary: { period: "today", from: null, to: null },
   expandedTxnId: null,
   expandedDayKey: null,
@@ -204,6 +235,21 @@ const initialUI: UIState = {
 };
 
 export const currentRoute = (s: Pick<AppState, "stack">): Route => s.stack[s.stack.length - 1]!;
+
+/** Returns the split with new items, keeping its open time (set when the first item arrives, dropped when empty). */
+function withItems(sp: Split, items: OrderItem[]): Split {
+  if (!items.length) return { items };
+  return { items, openedAt: sp.items.length && sp.openedAt ? sp.openedAt : sp.openedAt ?? new Date().toISOString() };
+}
+
+function servedAs(it: OrderItem, served: number): OrderItem {
+  const { served: _s, ...rest } = it;
+  return served > 0 ? { ...rest, served: Math.min(served, it.qty) } : rest;
+}
+
+function capServed(it: OrderItem): OrderItem {
+  return it.served !== undefined && it.served > it.qty ? servedAs(it, it.qty) : it;
+}
 
 export const useApp = create<AppState>()((set, get) => {
   const setData = (fn: (d: AppData) => AppData) => {
@@ -236,7 +282,7 @@ export const useApp = create<AppState>()((set, get) => {
 
     // ---------- navigation ----------
     push(route) {
-      set((s) => ({ stack: [...s.stack, route], navDir: 1, dialog: null, sheetOpen: false, cashInput: "", activeSplit: 0 }));
+      set((s) => ({ stack: [...s.stack, route], navDir: 1, dialog: null, sheetOpen: false, cashInput: "", payMethod: "cash", utangName: "", activeSplit: 0 }));
     },
     goTab(name) {
       set((s) => {
@@ -247,6 +293,8 @@ export const useApp = create<AppState>()((set, get) => {
           dialog: null,
           sheetOpen: false,
           cashInput: "",
+          payMethod: "cash",
+          utangName: "",
           activeSplit: 0,
         };
       });
@@ -260,8 +308,9 @@ export const useApp = create<AppState>()((set, get) => {
       if (s.dialog) set({ dialog: null });
       else if (s.sheetOpen) set({ sheetOpen: false });
       else if (s.stack.length > 1) {
-        const leavingAsk = currentRoute(s).name === "ask";
-        set({ stack: s.stack.slice(0, -1), navDir: -1, ...(leavingAsk ? {} : { cashInput: "", activeSplit: 0 }) });
+        const leaving = currentRoute(s).name;
+        const keep = leaving === "ask" || leaving === "talk";
+        set({ stack: s.stack.slice(0, -1), navDir: -1, ...(keep ? {} : { cashInput: "", payMethod: "cash", utangName: "", activeSplit: 0 }) });
       }
       else return false;
       return true;
@@ -280,6 +329,8 @@ export const useApp = create<AppState>()((set, get) => {
         dialog: null,
         sheetOpen: false,
         cashInput: "",
+        payMethod: "cash",
+        utangName: "",
         activeSplit: 0,
       });
     },
@@ -288,9 +339,14 @@ export const useApp = create<AppState>()((set, get) => {
     },
     openAsk() {
       const s = get();
-      if (currentRoute(s).name === "ask") return;
+      if (currentRoute(s).name === "ask" || currentRoute(s).name === "talk") return;
       // Keep the table's state (active split) when asking from an order screen.
       set({ stack: [...s.stack, { name: "ask" }], navDir: 1, dialog: null, sheetOpen: false });
+    },
+    openTalk() {
+      const s = get();
+      if (currentRoute(s).name === "talk") return;
+      set({ stack: [...s.stack, { name: "talk" }], navDir: 1, dialog: null, sheetOpen: false });
     },
     openDialog(dialog) {
       set({ dialog });
@@ -312,30 +368,69 @@ export const useApp = create<AppState>()((set, get) => {
     setCashInput(v) {
       set({ cashInput: v });
     },
-    addItem(tableId, name, price, qty = 1, splitIdx) {
+    setPayMethod(payMethod) {
+      set({ payMethod });
+    },
+    setUtangName(utangName) {
+      set({ utangName: utangName.slice(0, 40) });
+    },
+    addItem(tableId, name, price, qty = 1, splitIdx, note) {
       const idx = splitIdx ?? get().activeSplit;
       updateTables(tableId, (splits) => {
         const next = splits.length ? splits.slice() : [{ items: [] }];
         const i = Math.min(idx, next.length - 1);
-        next[i] = { items: addToItems(next[i]!.items, name, price, qty) };
+        next[i] = withItems(next[i]!, addToItems(next[i]!.items, name, price, qty, note));
         return next;
       });
+    },
+    setItemNote(tableId, splitIdx, itemIdx, note) {
+      const clean = note.trim().slice(0, 60);
+      updateTables(tableId, (splits) =>
+        splits.map((sp, i) => {
+          if (i !== splitIdx || !sp.items[itemIdx]) return sp;
+          const line = sp.items[itemIdx]!;
+          const { note: _old, ...rest } = line;
+          const updated: OrderItem = clean ? { ...rest, note: clean } : rest;
+          // Merge into an identical line that already has this note.
+          const twin = sp.items.findIndex((it, j) => j !== itemIdx && it.name === line.name && it.price === line.price && (it.note ?? "") === clean);
+          if (twin >= 0) {
+            const items = sp.items
+              .map((it, j) => (j === twin ? { ...it, qty: it.qty + line.qty, ...(it.served || line.served ? { served: (it.served ?? 0) + (line.served ?? 0) } : {}) } : it))
+              .filter((_, j) => j !== itemIdx);
+            return withItems(sp, items);
+          }
+          return withItems(sp, sp.items.map((it, j) => (j === itemIdx ? updated : it)));
+        }),
+      );
+      set({ dialog: null });
+    },
+    setServed(tableId, splitIdx, itemIdx, served) {
+      updateTables(tableId, (splits) =>
+        splits.map((sp, i) =>
+          i !== splitIdx ? sp : withItems(sp, sp.items.map((it, j) => (j !== itemIdx ? it : servedAs(it, served ? it.qty : 0)))),
+        ),
+      );
+    },
+    serveAll(tableId, splitIdx) {
+      updateTables(tableId, (splits) =>
+        splits.map((sp, i) => (splitIdx !== undefined && i !== splitIdx ? sp : withItems(sp, sp.items.map((it) => servedAs(it, it.qty))))),
+      );
     },
     changeQty(tableId, splitIdx, itemIdx, delta) {
       updateTables(tableId, (splits) =>
         splits.map((sp, i) => {
           if (i !== splitIdx) return sp;
           const items = sp.items
-            .map((it, j) => (j === itemIdx ? { ...it, qty: it.qty + delta } : it))
+            .map((it, j) => (j === itemIdx ? capServed({ ...it, qty: it.qty + delta }) : it))
             .filter((it) => it.qty > 0);
-          return { items };
+          return withItems(sp, items);
         }),
       );
     },
     setLineQty(tableId, splitIdx, name, qty) {
       updateTables(tableId, (splits) =>
         splits.map((sp, i) =>
-          i !== splitIdx ? sp : { items: sp.items.map((it) => (it.name === name ? { ...it, qty } : it)).filter((it) => it.qty > 0) },
+          i !== splitIdx ? sp : withItems(sp, sp.items.map((it) => (it.name === name ? capServed({ ...it, qty }) : it)).filter((it) => it.qty > 0)),
         ),
       );
     },
@@ -355,24 +450,30 @@ export const useApp = create<AppState>()((set, get) => {
     clearSplit(tableId, splitIdx) {
       get().checkpoint("clear");
       updateTables(tableId, (splits) => splits.map((sp, i) => (i === splitIdx ? { items: [] } : sp)));
-      set({ dialog: null, cashInput: "", sheetOpen: false });
+      set({ dialog: null, cashInput: "", utangName: "", sheetOpen: false });
       get().showToast({
         text: `${tableDisplayName(get().data.tableList, tableId)} cleared`,
         action: { label: "Undo", run: () => get().undo() },
       });
     },
-    markPaid(tableId, splitIdx, cash) {
+    markPaid(tableId, splitIdx, cash, opts = {}) {
       const d = get().data;
       const splits = d.tables[tableId] ?? [];
       const split = splits[splitIdx];
       if (!split || !split.items.length) return null;
+      const method = opts.method ?? "cash";
+      const customer = opts.customer?.trim().slice(0, 40);
+      if (method === "utang" && !customer) return null;
       const txn: Txn = {
         id: nextTxnId(d.history),
         table: tableId,
-        items: split.items.map((i) => ({ ...i })),
+        // Serving state belongs to the open bill, not the sales record.
+        items: split.items.map(({ served: _s, ...i }) => ({ ...i })),
         total: splitTotal(split),
         ts: new Date().toISOString(),
-        ...(cash !== undefined && Number.isFinite(cash) ? { cash } : {}),
+        ...(method === "cash" && cash !== undefined && Number.isFinite(cash) ? { cash } : {}),
+        ...(method !== "cash" ? { method } : {}),
+        ...(method === "utang" ? { customer } : {}),
       };
       setData((dd) => ({
         ...dd,
@@ -382,6 +483,7 @@ export const useApp = create<AppState>()((set, get) => {
       haptic.success();
       const remaining = get().data.tables[tableId] ?? [];
       const top = currentRoute(get());
+      set({ payMethod: "cash", utangName: "" });
       if (remaining.length === 0) {
         set({ justSettledTableId: tableId, cashInput: "", sheetOpen: false });
         // The table is settled: its order screen is no longer useful, wherever it is in the stack.
@@ -393,6 +495,21 @@ export const useApp = create<AppState>()((set, get) => {
         set({ activeSplit: 0, cashInput: "", sheetOpen: false });
       }
       return txn;
+    },
+    payUtang(customer, amount, method) {
+      const d = get().data;
+      const account = findAccount(d.history, customer);
+      if (!account || amount <= 0) return 0;
+      const parts = allocateUtangPayment(account, amount);
+      if (!parts.length) return 0;
+      const ts = new Date().toISOString();
+      const byId = new Map(parts.map((p) => [p.txnId, p.amount]));
+      setData((dd) => ({
+        ...dd,
+        history: dd.history.map((t) => (byId.has(t.id) ? { ...t, payments: [...(t.payments ?? []), { ts, amount: byId.get(t.id)!, method }] } : t)),
+      }));
+      haptic.success();
+      return parts.reduce((s, p) => s + p.amount, 0);
     },
     addTable(name) {
       const id = get().data.nextCustomId;
@@ -484,6 +601,38 @@ export const useApp = create<AppState>()((set, get) => {
       }));
     },
 
+    setSoldOut(catId, itemId, soldOut) {
+      const key = businessDayKey(new Date(), get().data.settings);
+      setData((d) => ({
+        ...d,
+        menu: d.menu.map((c) =>
+          c.id !== catId
+            ? c
+            : {
+                ...c,
+                items: c.items.map((i) => {
+                  if (i.id !== itemId) return i;
+                  const { soldOut: _x, ...rest } = i;
+                  return soldOut ? { ...rest, soldOut: key } : rest;
+                }),
+              },
+        ),
+      }));
+    },
+
+    // ---------- expenses ----------
+    addExpense(amount, what) {
+      const d = get().data;
+      const id = Math.max(Date.now(), ...d.expenses.map((e) => e.id + 1));
+      const clean = what.trim().slice(0, 40) || "Expense";
+      setData((dd) => ({ ...dd, expenses: [...dd.expenses, { id, ts: new Date().toISOString(), amount: Math.round(amount * 100) / 100, what: clean }] }));
+      set({ dialog: null });
+      return id;
+    },
+    deleteExpense(id) {
+      setData((d) => ({ ...d, expenses: d.expenses.filter((e) => e.id !== id) }));
+    },
+
     // ---------- settings ----------
     updateSettings(patch) {
       setData((d) => ({ ...d, settings: { ...d.settings, ...patch } }));
@@ -491,6 +640,12 @@ export const useApp = create<AppState>()((set, get) => {
     },
     setTheme(theme) {
       get().updateSettings({ theme });
+    },
+    noteBackup() {
+      get().updateSettings({ lastBackupAt: new Date().toISOString(), backupSnoozeUntil: null });
+    },
+    snoozeBackup(days) {
+      get().updateSettings({ backupSnoozeUntil: new Date(Date.now() + days * 24 * 3600e3).toISOString() });
     },
 
     // ---------- sales history ----------
@@ -523,7 +678,7 @@ export const useApp = create<AppState>()((set, get) => {
       setData((dd) => ({
         ...dd,
         history: dd.history.filter((x) => x.id !== txnId),
-        tables: { ...dd.tables, [h.table]: [...(dd.tables[h.table] ?? []).filter((sp) => sp.items.length), { items: h.items.map((i) => ({ ...i })) }] },
+        tables: { ...dd.tables, [h.table]: [...(dd.tables[h.table] ?? []).filter((sp) => sp.items.length), { items: h.items.map((i) => ({ ...i, served: i.qty })), openedAt: h.ts }] },
       }));
       set({ dialog: null, expandedTxnId: null });
       get().showToast({ text: `Restored to ${tableDisplayName(d.tableList, h.table)}`, tone: "success" });

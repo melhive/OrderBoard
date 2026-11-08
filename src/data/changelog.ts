@@ -2,6 +2,19 @@
 export const APP_VERSION = `v${__APP_VERSION__.split(".")[0]}`;
 
 export const CHANGELOG: { version: string; changes: string[] }[] = [
+  { version: "v18", changes: [
+    "Talk mode — a hands-free voice conversation with Ask Agent: it listens, answers out loud and listens again; say “yes” or “oo” to confirm",
+    "Ask Agent knows the whole app: ask “paano mag-backup?” or “how do I split a bill?” and get the answer with a button that takes you there",
+    "Ask Agent chats casually in English or Taglish, fixes mistakes (“no, table 4”, “mami pala”), handles several orders in one sentence, and gives tips (long waits, sold-out items, old utang)",
+    "Utang: put a bill on a customer’s tab, record payments later, and see who owes what",
+    "Pay with Cash, GCash or Maya — Summary shows the money by method",
+    "Expenses and profit: record what you spend; Summary shows profit (sales minus expenses), and reports include it",
+    "Sold out: long-press a menu item (or say “ubos na ang pastil”); it’s back automatically the next day",
+    "Item notes like “walang sibuyas” or “extra sabaw” — tap an item on the bill",
+    "Served check marks and wait timers: tables show how long they’ve been open and turn red when food is late",
+    "Backup reminder when your last backup is over a week old",
+    "The startup screen now shows the same logo as the app icon, with no flicker",
+  ]},
   { version: "v17", changes: [
     "Fresh new look across the whole app, with a new logo and app icon",
     "Ask Agent is now a full chat screen: scroll back through earlier messages, jump to the latest, and pick up where you left off — your chat is saved on this phone (clear it any time)",

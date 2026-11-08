@@ -9,17 +9,28 @@ import "./styles.css";
 const rootEl = document.getElementById("root")!;
 const root = createRoot(rootEl);
 
-function Boot({ error }: { error?: string }) {
+function Boot({ error }: { error: string }) {
   return (
     <div className="boot">
-      <img src="./icon-192.png" alt="" />
-      {error ? <div className="boot-error">{error}</div> : <span>Loading…</span>}
+      <img src="./app-icon-192.png" alt="" />
+      <div className="boot-error">{error}</div>
     </div>
   );
 }
 
+/** Fades out the startup logo from index.html once the app has painted. */
+function hideSplash() {
+  const el = document.getElementById("splash");
+  if (!el) return;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      el.classList.add("hide");
+      setTimeout(() => el.remove(), 300);
+    }),
+  );
+}
+
 async function start() {
-  root.render(<Boot />);
   try {
     const [{ data, source }, chat] = await Promise.all([loadAppData(), loadChat<ChatMessage>()]);
     useApp.getState().init(data);
@@ -33,6 +44,7 @@ async function start() {
     root.render(
       <Boot error="Order Board couldn’t open its storage on this device. If you’re in a private/incognito window, open it in a normal window instead. Your data has not been changed." />,
     );
+    hideSplash();
     return;
   }
   root.render(
@@ -40,6 +52,7 @@ async function start() {
       <App />
     </StrictMode>,
   );
+  hideSplash();
   void requestPersistentStorage();
 }
 

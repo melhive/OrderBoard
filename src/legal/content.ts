@@ -7,7 +7,7 @@
 
 export const PUBLISHER = "Order Board";
 export const CONTACT_EMAIL = "support@example.com"; // TODO: replace with your real support address
-export const LEGAL_VERSION = "2026-11-08.2";
+export const LEGAL_VERSION = "2026-11-08.3";
 export const LEGAL_EFFECTIVE = "November 8, 2026";
 
 export interface LegalSection {
@@ -25,9 +25,11 @@ export const PRIVACY: LegalSection[] = [
   {
     heading: "Information stored on your device",
     body: [
-      "Order and billing data: tables, items ordered, prices, split bills, cash received and change.",
-      "Sales history: paid orders with their date, time, table and total.",
-      "Menu and settings: your items, prices, item nicknames, business name, working hours, theme and assistant preferences.",
+      "Order and billing data: tables, items ordered, prices, split bills, kitchen notes (for example “walang sibuyas”), which items have been served and when a bill was opened, cash received and change.",
+      "Sales history: paid orders with their date, time, table, total and how they were paid (cash, GCash, Maya or utang). Order Board only records which method was used; it does not connect to GCash, Maya or any bank.",
+      "Utang (credit): the customer name you type for an order paid later, and the payments recorded against it. Only enter names your customers are comfortable with, and remove them when no longer needed by restoring or deleting the order.",
+      "Expenses: amounts and descriptions you record, used to show profit.",
+      "Menu and settings: your items, prices, item nicknames, items marked sold out, business name, working hours, theme, backup reminder and assistant preferences.",
       "Assistant conversation: your recent messages with Ask Agent (up to 200) are saved on this device so you can scroll back through them. You can delete them at any time with “Clear chat” in Ask Agent.",
       "This information stays in your browser’s or the app’s private storage on this device. It is not sent to us or anyone else.",
     ],
@@ -49,7 +51,8 @@ export const PRIVACY: LegalSection[] = [
   {
     heading: "Permissions",
     body: [
-      "Microphone: only used for voice input while you are holding or have tapped the microphone button.",
+      "Microphone: only used for voice input after you tap the microphone, or while Talk mode is open (it listens between replies until you leave Talk mode).",
+      "Screen: while Talk mode is open, Order Board may ask your phone to keep the screen on.",
       "Storage / files: only used when you choose to export a report or backup, or import a backup file.",
     ],
   },

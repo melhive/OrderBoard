@@ -1,7 +1,7 @@
 {
   "name": "order-board",
   "private": true,
-  "version": "17.0.0",
+  "version": "18.0.0",
   "type": "module",
   "description": "Order Board — offline order taking and sales tracking for street food stalls.",
   "scripts": {

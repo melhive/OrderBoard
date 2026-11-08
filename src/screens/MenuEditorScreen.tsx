@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store/appStore";
 import type { MenuCategory, MenuItem } from "../data/types";
 import { peso } from "../lib/format";
+import { isSoldOut } from "../lib/money";
 import { TopBar } from "../ui/components";
 import { IconGrip, IconPencil, IconPlus, IconTrash } from "../ui/Icons";
 
@@ -29,7 +30,8 @@ const lift = { scale: 1.02, boxShadow: "0 12px 28px rgba(0,0,0,0.3)", zIndex: 5 
 
 function ItemRow({ cat, item, onDrop }: { cat: MenuCategory; item: MenuItem; onDrop: () => void }) {
   const controls = useDragControls();
-  const { openDialog } = useApp.getState();
+  const { openDialog, setSoldOut } = useApp.getState();
+  const out = useApp((s) => isSoldOut(item, s.data.settings));
   return (
     <Reorder.Item as="li" value={item.id} dragListener={false} dragControls={controls} className="mitem" onDragEnd={onDrop} whileDrag={lift}>
       <button className="drag-handle" aria-label={`Drag to reorder ${item.name}`} onPointerDown={(e) => controls.start(e)}>
@@ -41,6 +43,14 @@ function ItemRow({ cat, item, onDrop }: { cat: MenuCategory; item: MenuItem; onD
           {item.aliases?.length ? <small>Also: {item.aliases.join(", ")}</small> : null}
         </span>
         <span className="mitem-price">{peso(item.price)}</span>
+      </button>
+      <button
+        className={`soldout-toggle${out ? " on" : ""}`}
+        aria-pressed={out}
+        aria-label={out ? `${item.name} is sold out — mark available` : `Mark ${item.name} sold out`}
+        onClick={() => setSoldOut(cat.id, item.id, !out)}
+      >
+        {out ? "Sold out" : "In stock"}
       </button>
     </Reorder.Item>
   );
@@ -110,7 +120,7 @@ export function MenuEditorScreen() {
         }
       />
       <main className="screen-body">
-        <p className="intro">Tap an item to change its name, price or nicknames. Drag ⋮⋮ to reorder. Changes show on the order screen right away.</p>
+        <p className="intro">Tap an item to change its name, price or nicknames. Drag ⋮⋮ to reorder. “Sold out” lasts until the next business day — you can also long-press an item on the order screen.</p>
         <Reorder.Group as="ul" axis="y" values={order} onReorder={setOrder} className="reorder-list">
           {order.map((id) => {
             const cat = byId.get(id);

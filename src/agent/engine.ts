@@ -5,8 +5,10 @@
 // either immediately (safe, undoable changes like adding items) or after the
 // user confirms (payments, clearing, menu edits).
 
-import type { AppData, TableDef } from "../data/types";
-import { splitTotal, tableDisplayName } from "../lib/bill";
+import type { AppData, MoneyMethod, TableDef } from "../data/types";
+import { fmtElapsed, minutesSince, splitTotal, tableDisplayName, tableOpenedAt, tableTotal, tableUnserved } from "../lib/bill";
+import { backupDue, expensesForPeriod, findAccount, isSoldOut, moneyBreakdown, utangAccounts, utangBalance } from "../lib/money";
+import { howTo, isTaglish, smallTalk } from "./knowledge";
 import {
   addDays,
   businessDayKey,
@@ -30,7 +32,7 @@ import {
   type ParsedLine,
 } from "./menuMatch";
 import { isNumberToken } from "./text";
-import type { AgentContext, AgentInput, AgentReply, Card, Line, Pending, Plan, World } from "./types";
+import type { AgentContext, AgentInput, AgentReply, Card, Line, Pending, Plan, Resumed, World } from "./types";
 
 const CONTEXT_TTL_MS = 3 * 60 * 1000;
 const LOW_CONFIDENCE = 0.8;
@@ -255,7 +257,7 @@ function menuIndex(data: AppData): MenuIndex {
   return indexCache.index;
 }
 
-export function respond(input: AgentInput, world: World, ctx: AgentContext): RespondResult {
+export function respond(input: AgentInput, world: World, ctx: AgentContext, opts: { split?: boolean } = {}): RespondResult {
   // Button presses on a confirmation card.
   if (typeof input !== "string") {
     const p = ctx.pending;
@@ -290,7 +292,10 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
         const tb = world.data.tableList.find((t) => prepareTokens(t.name).join(" ") === (n ?? ""));
         if (tb) tableId = tb.id;
       }
-      if (tableId !== null) return { reply: pending.resume(tableId, world, cleared), ctx: rememberTable(cleared, tableId, world) };
+      if (tableId !== null) {
+        const out = pending.resume(tableId, world, cleared);
+        return isResumed(out) ? { reply: out.reply, ctx: rememberTable(out.ctx, tableId, world) } : { reply: out, ctx: rememberTable(cleared, tableId, world) };
+      }
       if (toks.some((t) => NO.has(t)) && toks.length <= 3) return { reply: { text: "Okay, cancelled." }, ctx: cleared };
       if (ref.missing) return { reply: { text: `There’s no Table ${ref.missing}. Which table should I use?`, suggestions: tableSuggestions(world.data) }, ctx };
       return respond(raw, world, cleared);
@@ -311,6 +316,15 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
       if (toks.some((t) => NO.has(t)) && toks.length <= 3) return { reply: { text: "Okay, I won’t add it." }, ctx: cleared };
       return respond(raw, world, cleared);
     }
+    if (pending.kind === "needName") {
+      if (toks.some((t) => NO.has(t)) && toks.length <= 3) return { reply: { text: "Okay, cancelled." }, ctx: cleared };
+      const name = nameFromAnswer(raw);
+      if (name && toks.length <= 4) {
+        const out = pending.resume(name, world, cleared);
+        return isResumed(out) ? out : { reply: out, ctx: cleared };
+      }
+      return respond(raw, world, cleared);
+    }
     if (pending.kind === "needSplit") {
       const sp = extractSplit(toks);
       let split = sp.split;
@@ -322,25 +336,43 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
 
   const data = world.data;
   const index = menuIndex(data);
+  const tl = isTaglish(raw);
 
   if (toks.length <= 3 && toks.every((t) => YES.has(t) || NO.has(t) || t === "po")) {
     return { reply: { text: "There’s nothing waiting for a yes or no right now. Tell me an order, or ask about a table or your sales.", suggestions: ["Which tables are open?", "Sales today"] }, ctx };
   }
 
+  // ----- several commands in one message -----
+  if (opts.split !== false) {
+    const multi = multiCommand(toks, world, ctx);
+    if (multi) return multi;
+  }
+
   // ----- social / meta -----
-  if (/^(hi|hello|hey|hiya|yo|good (morning|afternoon|evening)|kumusta|musta)\b/.test(norm) && toks.length <= 4) {
-    const name = data.settings.businessName ? ` at ${data.settings.businessName}` : "";
-    return { reply: { text: `Hello! Ready to take orders${name}. Try “2 pares with egg for table 3”.`, suggestions: ["What can you do?", "How much did we sell today?", "Which tables are open?"] }, ctx };
-  }
-  if (has(toks, "thanks", "thank", "salamat", "ty", "thx")) {
-    return { reply: { text: "You’re welcome! Anything else?" }, ctx };
-  }
-  if (hasPhrase(norm, "who are you", "what are you", "your name")) {
-    return { reply: { text: "I’m the Order Board assistant. I take orders, manage bills and answer questions about your sales — all on this phone, no internet needed." }, ctx };
-  }
-  if (has(toks, "help", "commands", "examples") || hasPhrase(norm, "what can you do", "how do i", "how to use", "what can i say")) {
+  if (has(toks, "help", "commands", "examples") && toks.length <= 3 || hasPhrase(norm, "what can you do", "how to use", "what can i say", "what else can you do", "anong kaya mo", "what kaya mo")) {
     return { reply: helpReply(), ctx };
   }
+  const chat = smallTalk(norm, raw, world.now.getHours());
+  if (chat) {
+    let text = tl ? chat.tl : chat.en;
+    if (chat.status) {
+      const top = insights(world)[0];
+      text += ` ${statusLine(world, tl)}${top ? ` ${top.text}` : ""}`;
+      if (/^(hi|hello|hey|good|magandang|kumusta|kamusta|musta|uy|oy|yo)/.test(norm) && !tl) text = text.replace("I’m here.", "Ready to take orders.");
+    }
+    return { reply: { text, suggestions: chat.status ? ["Which tables are open?", "Any tips?"] : undefined }, ctx };
+  }
+  const topic = howTo(norm, raw);
+  if (topic) {
+    return { reply: { text: tl && topic.tl ? topic.tl : topic.en, link: topic.link, suggestions: topic.try }, ctx };
+  }
+  if (has(toks, "tips", "tip", "insight", "insights", "updates", "update", "status", "balita", "lagay") || hasPhrase(norm, "anything i should know", "what should i know", "how is tonight", "how is it going", "kumusta ang gabi", "kumusta benta", "kamusta benta", "musta benta")) {
+    if (!has(toks, "table") || has(toks, "tips", "tip")) return { reply: tipsReply(world, tl), ctx };
+  }
+
+  // ----- corrections: "no, table 4", "mami pala" -----
+  const corr = correctionReply(toks, norm, world, ctx, index);
+  if (corr) return corr;
 
   // ----- undo -----
   if (/^(undo|revert|scratch that|take that back|undo that|undo last)\b/.test(norm) || norm === "oops") {
@@ -360,7 +392,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   }
 
   // ----- navigation -----
-  const navVerb = has(toks, "go", "open", "show", "navigate", "switch", "take", "view", "display", "bring");
+  const navVerb = has(toks, "go", "open", "show", "navigate", "switch", "take", "view", "display", "bring", "start", "begin", "use");
   const nav = navigationTarget(toks, norm);
   if (nav && (navVerb || toks.length <= 2)) {
     return { reply: { text: nav.text, execute: { kind: "navigate", route: nav.route } }, ctx };
@@ -411,6 +443,22 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   if (menuReply) return menuReply;
 
   // ----- table management -----
+  // ----- sold out -----
+  const sold = soldOutReply(raw, toks, world, ctx, index);
+  if (sold) return sold;
+
+  // ----- expenses / profit -----
+  const exp = expenseReply(raw, toks, norm, world, ctx);
+  if (exp) return exp;
+
+  // "add to table 3" with nothing else: remember the table and ask what to add.
+  {
+    const r0 = extractTable(toks, data);
+    if (r0.tableId !== null && has(toks, "add", "order") && r0.rest.every((t) => ["add", "order", "to", "for", "sa", "on", "something", "items", "item", "po", "please", "the", "an", "a", "new"].includes(t))) {
+      return { reply: { text: `What should I add to ${tableName(data, r0.tableId)}?`, suggestions: data.menu.slice(0, 4).map((c) => c.items[0]?.name ?? c.cat) }, ctx: rememberTable(ctx, r0.tableId, world) };
+    }
+  }
+
   if (has(toks, "add", "create", "new") && has(toks, "table") && !parseItems(extractTable(toks, data).rest, index).lines.length) {
     const m = /\btable\s+(?:called|named|for)?\s*["“]?([^"”]+?)["”]?$/i.exec(raw.trim());
     const name = m?.[1]?.trim().slice(0, 24);
@@ -439,11 +487,27 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   const rest = ref.rest;
   const restNorm = rest.join(" ");
 
+  // ----- utang (credit) -----
+  const ut = utangReply(raw, toks, norm, world, ctx, explicitTable, rest);
+  if (ut) return ut;
+
+  // ----- serving & waiting -----
+  const sv = serveReply(raw, toks, world, ctx, index, explicitTable, rest);
+  if (sv) return sv;
+
+  // ----- notes on an item already on the bill -----
+  const nt = setNoteReply(toks, world, ctx, index, explicitTable, rest);
+  if (nt) return nt;
+
+  // ----- money: profit, gcash/maya/cash totals -----
+  const money = moneyReply(toks, norm, world, ctx, explicitTable);
+  if (money) return money;
+
   // ----- move a bill to another table: "move table 2 to table 4" -----
   if (has(toks, "move", "transfer", "lipat") && explicitTable !== null) {
     const to = secondTable(rest, data, explicitTable);
     if (to === null) {
-      return askTable(ctx, world, `Move ${tableName(data, explicitTable)}’s bill to which table?`, (tid, w, c) => moveReply(w, explicitTable, tid, c).reply);
+      return askTable(ctx, world, `Move ${tableName(data, explicitTable)}’s bill to which table?`, (tid, w, c) => moveReply(w, explicitTable, tid, c));
     }
     return moveReply(world, explicitTable, to, rememberTable(ctx, to, world));
   }
@@ -481,12 +545,13 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   const payWords = has(toks, "paid", "pay", "pays", "payment", "settle", "settled", "checkout", "billout") || hasPhrase(norm, "check out", "bill out", "close the bill", "close bill");
   if (payWords) {
     const tableId = explicitTable ?? contextTable(world, ctx);
-    const cash = extractAmount(rest, ["cash", "received", "gave", "give", "tendered", "with", "change", "pera", "bayad"]) ?? numbersOtherThanTable(rest);
+    const method: MoneyMethod = has(toks, "gcash") ? "gcash" : has(toks, "maya") ? "maya" : "cash";
+    const cash = method === "cash" ? extractAmount(rest, ["cash", "received", "gave", "give", "tendered", "with", "change", "pera", "bayad"]) ?? numbersOtherThanTable(rest) : undefined;
     const sp = extractSplit(rest);
     if (tableId === null) {
-      return askTable(ctx, world, "Which table is paying?", (tid, w, c) => payReply(w, tid, sp.split, cash, c).reply);
+      return askTable(ctx, world, "Which table is paying?", (tid, w, c) => payReply(w, tid, sp.split, cash, c, method));
     }
-    return payReply(world, tableId, sp.split, cash, rememberTable(ctx, tableId, world));
+    return payReply(world, tableId, sp.split, cash, rememberTable(ctx, tableId, world), method);
   }
 
   // ----- new split -----
@@ -502,7 +567,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
     const items = parseItems(rest.filter((t) => !["clear", "void", "empty", "cancel"].includes(t)), index);
     if (!items.lines.length) {
       const tableId = explicitTable ?? contextTable(world, ctx);
-      if (tableId === null) return askTable(ctx, world, "Which table should I clear?", (tid, w, c) => clearReply(w, tid, c).reply);
+      if (tableId === null) return askTable(ctx, world, "Which table should I clear?", (tid, w, c) => clearReply(w, tid, c));
       return clearReply(world, tableId, rememberTable(ctx, tableId, world));
     }
   }
@@ -518,6 +583,10 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
       return { reply: removeReply(world, tableId, parsed.lines, cleaned), ctx: rememberTable(ctx, tableId, world) };
     }
   }
+
+  // ----- swap an item: "change pares to mami" -----
+  const sw = swapReply(toks, world, ctx, index, explicitTable, rest);
+  if (sw) return sw;
 
   // ----- set quantity: "make it 3", "change siomai to 3" -----
   const setQ = /\b(?:make (?:it|that|them)|change (?:it|that|.+?) to|set (?:.+?) to|should be|only) (\d+)\b/.exec(norm);
@@ -550,12 +619,14 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
   const isRepeat = /^(another (?:one|1)|(?:one|1) more|same again|again|same|same order|repeat|repeat that|same for|same thing)\b/.test(restNorm) || hasPhrase(norm, "same for", "same order for", "same thing for");
   if (isRepeat && ctx.lastLines.length) {
     const tableId = explicitTable ?? contextTable(world, ctx);
-    if (tableId === null) return askTable(ctx, world, "Which table is that for?", (tid, w, c) => addReply(w, c, tid, ctx.lastLines, []).reply);
+    if (tableId === null) return askTable(ctx, world, "Which table is that for?", (tid, w, c) => addReply(w, c, tid, ctx.lastLines, []));
     return addReply(world, rememberTable(ctx, tableId, world), tableId, ctx.lastLines, []);
   }
 
   // ----- add items (the default) -----
-  const parsed = parseItems(rest, index);
+  const noted = extractNotes(rest, index);
+  const parsed = parseItems(noted.rest, index);
+  if (noted.notes.length && parsed.lines.length) attachNotes(parsed.lines, noted.rest, noted.notes);
   // An unknown phrase only becomes a custom-item offer when it clearly is an
   // order: a short name with a quantity or an "add/order" verb.
   const orderish = parsed.unknownItems.length === 1 && parsed.unknownItems[0]!.text.split(" ").length <= 3 &&
@@ -567,7 +638,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
     const tableId = explicitTable ?? contextTable(world, ctx);
     if (tableId === null) {
       return askTable(ctx, world, lines.length ? `Which table is ${linesText(lines)} for?` : "Which table is this for?", (tid, w, c) =>
-        addReply(w, c, tid, lines, parsed.unknown, lowConfidence, parsed.unknownItems[0]?.qty ?? 1).reply);
+        addReply(w, c, tid, lines, parsed.unknown, lowConfidence, parsed.unknownItems[0]?.qty ?? 1));
     }
     return addReply(world, rememberTable(ctx, tableId, world), tableId, lines, parsed.unknown, lowConfidence, parsed.unknownItems[0]?.qty ?? 1);
   }
@@ -579,6 +650,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
       reply: {
         text: `I’m not sure what you meant. Did you mean ${sug.map((s) => `“${s.name}”`).join(" or ")}?`,
         suggestions: sug.map((s) => s.name),
+        tone: "warn",
       },
       ctx,
     };
@@ -596,7 +668,25 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext): Res
 // ---------- intent handlers ----------
 
 function toLine(p: ParsedLine): Line {
-  return { name: p.item.name, price: p.item.price, qty: p.qty };
+  const note = (p as ParsedLine & { note?: string }).note;
+  return { name: p.item.name, price: p.item.price, qty: p.qty, ...(note ? { note } : {}) };
+}
+
+/** Gives each note to the item said just before it ("2 pares walang sibuyas, 1 mami"). */
+function attachNotes(lines: ParsedLine[], toks: string[], notes: { at: number; text: string }[]) {
+  let cursor = 0;
+  const starts = lines.map((l) => {
+    const first = l.heard.split(" ")[0] ?? "";
+    const i = toks.indexOf(first, cursor);
+    if (i >= 0) cursor = i + 1;
+    return i < 0 ? cursor : i;
+  });
+  for (const n of notes) {
+    let k = 0;
+    for (let i = 0; i < lines.length; i++) if (starts[i]! < n.at) k = i;
+    const l = lines[k] as ParsedLine & { note?: string };
+    l.note = l.note ? `${l.note}, ${n.text}` : noteText(n.text);
+  }
 }
 
 function titleCase(s: string) {
@@ -614,7 +704,11 @@ function numbersOtherThanTable(rest: string[]): number | undefined {
   return n.length === 1 ? n[0] : undefined;
 }
 
-function askTable(ctx: AgentContext, world: World, question: string, resume: (tid: number, w: World, c: AgentContext) => AgentReply): RespondResult {
+function isResumed(x: AgentReply | Resumed): x is Resumed {
+  return typeof (x as Resumed).reply === "object" && (x as Resumed).ctx !== undefined;
+}
+
+function askTable(ctx: AgentContext, world: World, question: string, resume: (tid: number, w: World, c: AgentContext) => AgentReply | Resumed): RespondResult {
   const pending: Pending = { kind: "needTable", resume };
   return { reply: { text: question, suggestions: tableSuggestions(world.data) }, ctx: { ...ctx, pending } };
 }
@@ -655,14 +749,17 @@ function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[
     text += ` I couldn’t find ${unknown.map((u) => `“${u}”`).join(", ")} on the menu — tell me its price to add it as a custom item.`;
     nextCtx = { ...nextCtx, pending: null };
   }
-  const needsConfirm = data.settings.agent.confirmAdds || lowConfidence.length > 0;
+  const soldOut = lines.filter((l) => data.menu.some((c) => c.items.some((i) => i.name === l.name && i.price === l.price && isSoldOut(i, data.settings, world.now))));
+  const needsConfirm = data.settings.agent.confirmAdds || lowConfidence.length > 0 || soldOut.length > 0;
   if (needsConfirm) {
     const heard = lowConfidence.map((l) => `“${l.heard}” → ${l.item.name}`).join(", ");
-    const q = `Add ${linesText(lines)} to ${name}?${heard ? ` (I matched ${heard}.)` : ""}`;
+    const out = soldOut.length ? `${soldOut.map((l) => l.name).join(" and ")} ${soldOut.length > 1 ? "are" : "is"} marked sold out. ` : "";
+    const q = `${out}Add ${linesText(lines)} to ${name}${out ? " anyway" : ""}?${heard ? ` (I matched ${heard}.)` : ""}`;
     const r = confirmReply(nextCtx, plan, q, "Add to bill", text, true, card);
     return { reply: { ...r.reply, speak: `Add ${spokenLines(lines)} to ${name}?` }, ctx: r.ctx };
   }
   if (unknown.length === 1 && unknown[0]!.split(" ").length <= 3) nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: unknown[0]!, qty: unknownQty, tableId, split } };
+  nextCtx = { ...nextCtx, lastAdd: { tableId, split, lines, at: world.now.getTime() } };
   return { reply: { text, speak, execute: plan, undoable: true, card }, ctx: nextCtx };
 }
 
@@ -692,7 +789,7 @@ function removeReply(world: World, tableId: number, parsed: ParsedLine[], tokens
   };
 }
 
-function payReply(world: World, tableId: number, splitSel: number | "all" | null, cash: number | undefined, ctx: AgentContext): RespondResult {
+function payReply(world: World, tableId: number, splitSel: number | "all" | null, cash: number | undefined, ctx: AgentContext, method: MoneyMethod | "utang" = "cash", customer?: string): RespondResult {
   const data = world.data;
   const name = tableName(data, tableId);
   const splits = data.tables[tableId] ?? [];
@@ -712,7 +809,7 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
         text: `${name} has ${nonEmpty.length} separate bills: ${nonEmpty.map((x) => `Split ${x.i + 1} (${peso(splitTotal(x.s))})`).join(", ")}. Which one is paying?`,
         suggestions: [...nonEmpty.map((x) => `Split ${x.i + 1}`), "All of them"],
       },
-      ctx: { ...ctx, pending: { kind: "needSplit", tableId, cash } },
+      ctx: { ...ctx, pending: method === "cash" ? { kind: "needSplit", tableId, cash } : null },
     };
   }
 
@@ -723,6 +820,13 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
   }
   const changeText = cash !== undefined ? ` Cash ${peso(cash)}, change ${peso(cash - total)}.` : "";
   const splitText = splits.length > 1 ? (chosen.length > 1 ? " (all bills)" : ` (Split ${chosen[0]! + 1})`) : "";
+  if (method === "utang" && customer) {
+    const owes = findAccount(data.history, customer)?.balance ?? 0;
+    return confirmReply(ctx, { kind: "pay", tableId, splits: chosen, method, customer }, `Put ${name}${splitText} (${peso(total)}) on ${customer}’s utang?${owes ? ` They already owe ${peso(owes)}.` : ""}`,
+      "Add to utang", `${name}${splitText} — ${peso(total)} added to ${customer}’s utang.${owes ? ` Total owed: ${peso(owes + total)}.` : ""}`, false,
+      { kind: "bill", title: `${name}${splitText} · utang`, lines, total, note: `Utang · ${customer}` });
+  }
+  const via = method === "gcash" ? " via GCash" : method === "maya" ? " via Maya" : "";
   const card: Card = {
     kind: "bill",
     title: `${name}${splitText}`,
@@ -730,8 +834,8 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
     total,
     note: cash !== undefined ? `Cash ${peso(cash)} · Change ${peso(cash - total)}` : undefined,
   };
-  return confirmReply(ctx, { kind: "pay", tableId, splits: chosen, cash }, `Mark ${name}${splitText} as paid? Total ${peso(total)}.${changeText}`,
-    "Mark paid", `${name}${splitText} paid — ${peso(total)} recorded.${changeText}`, false, card);
+  return confirmReply(ctx, { kind: "pay", tableId, splits: chosen, cash, ...(method !== "cash" ? { method } : {}) }, `Mark ${name}${splitText} as paid${via}? Total ${peso(total)}.${changeText}`,
+    "Mark paid", `${name}${splitText} paid${via} — ${peso(total)} recorded.${changeText}`, false, method !== "cash" ? { ...card, note: `Paid${via}` } as Card : card);
 }
 
 function secondTable(rest: string[], data: AppData, from: number): number | null {
@@ -854,6 +958,8 @@ function navigationTarget(toks: string[], norm: string): { route: import("../sto
   if (has(toks, "privacy")) return { route: { name: "legal", doc: "privacy" }, text: "Opening the Privacy Policy." };
   if (has(toks, "terms")) return { route: { name: "legal", doc: "terms" }, text: "Opening the Terms of Use." };
   if (hasPhrase(norm, "about the app", "about app", "about screen", "about")) return toks.length <= 3 ? { route: { name: "about" }, text: "Opening About." } : null;
+  if (hasPhrase(norm, "utang list", "utang screen", "credit list", "utang page")) return { route: { name: "utang" }, text: "Opening the utang list." };
+  if (hasPhrase(norm, "talk mode", "voice mode", "voice conversation", "hands free mode", "usap tayo", "lets talk", "let us talk", "conversation mode")) return { route: { name: "talk" }, text: "Starting Talk mode." };
   if (has(toks, "home") || norm === "tables" || hasPhrase(norm, "go to tables", "show tables", "all tables", "back to tables")) return { route: { name: "tables" }, text: "Going to Tables." };
   return null;
 }
@@ -1144,25 +1250,640 @@ function statusReply(world: World, tableId: number): AgentReply {
 
 function helpReply(): AgentReply {
   return {
-    text: "Here’s what I can do. Everything works offline.",
+    text: "Here’s what I can do — all offline, in English or Taglish. You can also ask me how to do anything in the app, like “paano mag-utang?”.",
     card: {
       kind: "list",
       title: "Try saying",
       rows: [
-        { label: "“2 pares with egg and rice for table 3”", sub: "Take orders — several items at once" },
-        { label: "“and a water” · “make it 3” · “same for table 4”", sub: "Follow-ups remember the last table" },
-        { label: "“remove 1 siomai from table 2”", sub: "Change a bill" },
-        { label: "“table 3 paid 500 cash”", sub: "Settle a bill and get the change" },
-        { label: "“what’s on table 1?” · “which tables are open?”", sub: "Check bills" },
-        { label: "“how much did we sell today?” · “best seller this week”", sub: "Sales answers" },
-        { label: "“change the price of mami to 55”", sub: "Edit the menu" },
-        { label: "“change for 500 on table 2”", sub: "Work out change before paying" },
+        { label: "“2 pares with egg, 1 mami walang sibuyas for table 3”", sub: "Orders, several items and notes at once" },
+        { label: "“2 pares for table 1 and 3 siomai for table 2”", sub: "Several tables in one go" },
+        { label: "“no, table 4” · “mami pala” · “make it 3”", sub: "Fix the last order" },
+        { label: "“table 3 paid 500” · “table 2 paid gcash”", sub: "Pay with cash, GCash or Maya" },
+        { label: "“table 2 utang ni Ben” · “Ben paid 100” · “sino may utang?”", sub: "Utang (pay later)" },
+        { label: "“served na table 2” · “sino naghihintay?”", sub: "Serving and wait times" },
+        { label: "“ubos na ang pastil” · “pastil available na”", sub: "Sold out for today" },
+        { label: "“gastos 300 sa yelo” · “profit today”", sub: "Expenses and profit" },
+        { label: "“how much did we sell today?” · “compare today and yesterday”", sub: "Sales answers and insights" },
+        { label: "“any tips?” · “kumusta benta?”", sub: "What needs attention right now" },
         { label: "“move table 2 to table 4” · “split table 2”", sub: "Move or split bills" },
-        { label: "“compare today and yesterday” · “busiest hour”", sub: "Insights on your sales" },
-        { label: "“dalawang pares, table 3” · “magkano table 1?”", sub: "Taglish works too" },
-        { label: "“export today’s report as pdf” · “undo”", sub: "Reports and corrections" },
+        { label: "“change the price of mami to 55” · “export today as pdf”", sub: "Menu and reports" },
+        { label: "“talk mode”", sub: "Hands-free voice conversation" },
       ],
     },
-    suggestions: ["Which tables are open?", "How much did we sell today?", "Show the menu"],
+    suggestions: ["Any tips?", "Which tables are open?", "Paano mag-backup?"],
+  };
+}
+
+// =====================================================================
+// v18 skills: conversation, how-to, corrections, multi-commands, utang,
+// payment methods, sold out, notes, serving, expenses, profit, tips.
+// =====================================================================
+
+const DAY_MS = 24 * 3600e3;
+
+function todaySpec(): PeriodSpec {
+  return { period: "today" };
+}
+
+function openTables(data: AppData) {
+  return data.tableList
+    .map((t) => ({ t, splits: data.tables[t.id] ?? [] }))
+    .filter((x) => x.splits.some((s) => s.items.length));
+}
+
+/** One-line status of the night, used by greetings and Talk mode. */
+export function statusLine(world: World, tl = false): string {
+  const data = world.data;
+  const s = summarize(txnsForPeriod(data.history, todaySpec(), data.settings, world.now));
+  const open = openTables(data);
+  const unpaid = open.reduce((sum, x) => sum + tableTotal(x.splits), 0);
+  if (tl) {
+    const a = s.orders ? `${peso(s.total)} na ang benta mula sa ${s.orders} order` : "Wala pang benta ngayon";
+    const b = open.length ? `, ${open.length} table ang bukas (${peso(unpaid)} hindi pa bayad)` : ", walang bukas na table";
+    return `${a}${b}.`;
+  }
+  const a = s.orders ? `So far today: ${peso(s.total)} from ${plural(s.orders, "order")}` : "No sales yet today";
+  const b = open.length ? `, ${plural(open.length, "table")} open (${peso(unpaid)} unpaid)` : ", no open tables";
+  return `${a}${b}.`;
+}
+
+export interface Tip {
+  kind: "wait" | "long" | "soldout" | "fast" | "pace" | "utang" | "backup";
+  text: string;
+  tableId?: number;
+  /** Lower comes first. */
+  rank: number;
+}
+
+/** Things worth knowing right now — shown in Ask and spoken in Talk mode. */
+export function insights(world: World): Tip[] {
+  const data = world.data;
+  const now = world.now;
+  const tips: Tip[] = [];
+  for (const { t, splits } of openTables(data)) {
+    const opened = tableOpenedAt(splits);
+    if (!opened) continue;
+    const mins = minutesSince(opened, now);
+    const toServe = tableUnserved(splits);
+    const name = tableName(data, t.id);
+    if (toServe > 0 && mins >= 15) tips.push({ kind: "wait", rank: 100 - mins, tableId: t.id, text: `${name} has been waiting ${fmtElapsed(opened, now)} with ${plural(toServe, "item")} not served.` });
+    else if (toServe === 0 && mins >= 45) tips.push({ kind: "long", rank: 200 - mins, tableId: t.id, text: `${name} has been open ${fmtElapsed(opened, now)} and everything is served — ready to bill out?` });
+  }
+  const sold = data.menu.flatMap((c) => c.items).filter((i) => isSoldOut(i, data.settings, now));
+  if (sold.length) tips.push({ kind: "soldout", rank: 400, text: `Sold out today: ${sold.map((i) => i.name).join(", ")}.` });
+
+  const today = summarize(txnsForPeriod(data.history, todaySpec(), data.settings, now));
+  const top = today.best[0];
+  if (top && top.qty >= 5) tips.push({ kind: "fast", rank: 500, text: `${top.name} is your best seller tonight — ${top.qty} sold so far.` });
+
+  // Pace vs yesterday at the same time.
+  const yKey = addDays(businessDayKey(now, data.settings), -1);
+  const cutoff = now.getTime() - DAY_MS;
+  const ySoFar = data.history.filter((h) => businessDayKey(new Date(h.ts), data.settings) === yKey && Date.parse(h.ts) <= cutoff).reduce((s, h) => s + h.total, 0);
+  if (ySoFar > 0 && today.orders > 0) {
+    const diff = today.total - ySoFar;
+    tips.push({ kind: "pace", rank: 600, text: diff >= 0 ? `You’re ${peso(diff)} ahead of yesterday at this time.` : `You’re ${peso(-diff)} behind yesterday at this time.` });
+  }
+  for (const a of utangAccounts(data.history)) {
+    if (a.balance > 0 && a.since && now.getTime() - Date.parse(a.since) >= 7 * DAY_MS) {
+      tips.push({ kind: "utang", rank: 700, text: `${a.name} still owes ${peso(a.balance)} (oldest from ${Math.floor((now.getTime() - Date.parse(a.since)) / DAY_MS)} days ago).` });
+    }
+  }
+  if (backupDue(data.settings, data.history, now)) tips.push({ kind: "backup", rank: 800, text: data.settings.lastBackupAt ? "Your last backup is over a week old — say “back up now”." : "You haven’t saved a backup yet — say “back up now”." });
+  return tips.sort((a, b) => a.rank - b.rank);
+}
+
+function tipsReply(world: World, tl: boolean): AgentReply {
+  const tips = insights(world);
+  const head = statusLine(world, tl);
+  if (!tips.length) return { text: `${head} ${tl ? "Wala akong ibang dapat ipaalam — maayos ang lahat!" : "Nothing needs your attention right now."}` };
+  return {
+    text: `${head} ${tl ? "Ilang paalala:" : "A few things:"}`,
+    speak: `${head} ${tips.slice(0, 2).map((t) => t.text).join(" ")}`,
+    card: { kind: "list", title: tl ? "Mga paalala" : "Heads up", rows: tips.slice(0, 6).map((t) => ({ label: t.text })) },
+  };
+}
+
+// ---------- multi-command ----------
+
+const CONNECTORS = new Set(["and", ",", "then", "tapos", "also", "plus", "at", "after", "that", "next", "pati", "tsaka"]);
+const PREPS = new Set(["for", "sa", "para", "to", "on", "at", "in"]);
+
+interface TableHit {
+  start: number;
+  end: number;
+  id: number;
+}
+
+function findTableRefs(toks: string[], data: AppData): TableHit[] {
+  const hits: TableHit[] = [];
+  const byName = (cand: string[]) => data.tableList.find((tb) => {
+    const n = tableNameTokens(tb);
+    return n.length === cand.length && n.every((x, k) => x === cand[k]);
+  });
+  for (let i = 0; i < toks.length; i++) {
+    const w = toks[i]!;
+    const m = /^t(\d+)$/.exec(w);
+    if (m) {
+      const tb = byName([m[1]!]);
+      if (tb) hits.push({ start: i, end: i + 1, id: tb.id });
+      continue;
+    }
+    if (w === "table" || w === "tbl" || w === "mesa" || w === "tables") {
+      let j = i + 1;
+      if (toks[j] === "number" || toks[j] === "no") j++;
+      for (let len = 3; len >= 1; len--) {
+        const cand = toks.slice(j, j + len);
+        if (cand.length < len) continue;
+        const tb = byName(cand);
+        if (tb) {
+          hits.push({ start: i, end: j + len, id: tb.id });
+          i = j + len - 1;
+          break;
+        }
+      }
+      continue;
+    }
+    for (const tb of data.tableList) {
+      if (!tb.custom) continue;
+      const n = tableNameTokens(tb);
+      if (n.length && n.every((x, k) => toks[i + k] === x)) {
+        hits.push({ start: i, end: i + n.length, id: tb.id });
+        i += n.length - 1;
+        break;
+      }
+    }
+  }
+  return hits;
+}
+
+function trimConnectors(seg: string[]): string[] {
+  let a = 0;
+  let b = seg.length;
+  while (a < b && CONNECTORS.has(seg[a]!)) a++;
+  while (b > a && CONNECTORS.has(seg[b - 1]!)) b--;
+  return seg.slice(a, b);
+}
+
+function segmentFailed(r: RespondResult): boolean {
+  if (r.ctx.pending && r.ctx.pending.kind !== "confirm") return true;
+  if (!r.reply.execute && !r.reply.confirm && (r.reply.tone === "warn" || r.reply.tone === "error")) return true;
+  return false;
+}
+
+/** "2 pares for table 1 and 3 mami for table 2", "table 3 paid, table 4 paid", "add … then …". */
+function multiCommand(toks: string[], world: World, ctx: AgentContext): RespondResult | null {
+  const refs = findTableRefs(toks, world.data);
+  let segs: string[][] = [];
+  if (refs.length >= 2 && new Set(refs.map((r) => r.id)).size >= 2) {
+    const leading = toks.slice(0, refs[0]!.start).every((t) => CONNECTORS.has(t) || PREPS.has(t));
+    if (leading) {
+      refs.forEach((r, k) => segs.push(toks.slice(r.start, refs[k + 1]?.start ?? toks.length)));
+    } else {
+      let prev = 0;
+      refs.forEach((r, k) => {
+        const end = k === refs.length - 1 ? toks.length : r.end;
+        segs.push(toks.slice(prev, end));
+        prev = end;
+      });
+    }
+  } else {
+    let prev = 0;
+    for (let i = 0; i < toks.length; i++) {
+      const isThen = (toks[i] === "then" || toks[i] === "tapos") && i > 0;
+      const afterThat = toks[i] === "after" && toks[i + 1] === "that";
+      if (isThen || afterThat) {
+        segs.push(toks.slice(prev, i));
+        prev = afterThat ? i + 2 : i + 1;
+      }
+    }
+    if (!segs.length) return null;
+    segs.push(toks.slice(prev));
+  }
+  segs = segs.map(trimConnectors).filter((s) => s.length);
+  if (segs.length < 2) return null;
+
+  let c = ctx;
+  const results: RespondResult[] = [];
+  for (const seg of segs) {
+    const r = respond(seg.join(" "), world, c, { split: false });
+    if (segmentFailed(r)) return null;
+    results.push(r);
+    c = { ...r.ctx, pending: null };
+  }
+  const plans = results.flatMap((r) => (r.reply.execute ? [r.reply.execute] : r.reply.confirm ? [r.reply.confirm.plan] : []));
+  if (!plans.length) {
+    return { reply: { text: results.map((r) => r.reply.text).join(" "), card: [...results].reverse().find((r) => r.reply.card)?.reply.card }, ctx: c };
+  }
+  const needConfirm = results.some((r) => r.reply.confirm);
+  const batch: Plan = { kind: "batch", plans };
+  const rows = results.map((r, i) => ({ label: `${i + 1}. ${r.reply.confirm ? r.reply.confirm.doneText : r.reply.text}` }));
+  if (needConfirm) {
+    return confirmReply(c, batch, `Do these ${results.length} things?`, "Do all", results.map((r) => (r.reply.confirm ? r.reply.confirm.doneText : r.reply.text)).join(" "), true, { kind: "list", title: "Plan", rows });
+  }
+  return { reply: { text: results.map((r) => r.reply.text).join(" "), execute: batch, undoable: true, card: { kind: "list", title: "Done", rows } }, ctx: c };
+}
+
+// ---------- corrections ----------
+
+const CORR_START = /^(no|nope|hindi|mali|wrong|oops|sorry|actually|i mean|i meant|i said|correction|teka|ay|not that)\b/;
+const CORR_ANY = /\b(pala|instead|i mean|i meant)\b/;
+const CORR_WORDS = new Set(["no", "nope", "hindi", "mali", "wrong", "oops", "sorry", "actually", "i", "mean", "meant", "said", "correction", "teka", "ay", "pala", "instead", "not", "that", "it", "is", "should", "be", "sa", "for", "to", "dapat", ",", "po", "yung", "ang", "make", "na", "on", "was", "the"]);
+
+function correctionReply(toks: string[], norm: string, world: World, ctx: AgentContext, index: MenuIndex): RespondResult | null {
+  const last = ctx.lastAdd;
+  if (!last || world.now.getTime() - last.at > CONTEXT_TTL_MS) return null;
+  if (!CORR_START.test(norm) && !CORR_ANY.test(norm)) return null;
+  // "no more water", "remove …": that's a removal, not a correction.
+  if (has(toks, "more", "remove", "delete", "minus", "less", "drop", "cancel", "take", "without", "paid", "pay")) return null;
+  const data = world.data;
+  const ref = extractTable(toks, data);
+  const words = ref.rest.filter((t) => !CORR_WORDS.has(t));
+  const parsed = parseItems(words, index);
+  const newTable = ref.tableId !== null && ref.tableId !== last.tableId ? ref.tableId : null;
+  if (newTable === null && !parsed.lines.length) return null;
+  if (!data.tableList.some((t) => t.id === last.tableId)) return null;
+
+  const from = tableName(data, last.tableId);
+  if (newTable !== null && !parsed.lines.length) {
+    const split = splitFor(world, newTable);
+    const plan: Plan = {
+      kind: "batch",
+      plans: [
+        { kind: "removeItems", tableId: last.tableId, split: last.split, items: last.lines.map((l) => ({ name: l.name, qty: l.qty })) },
+        { kind: "addItems", tableId: newTable, split, items: last.lines },
+      ],
+    };
+    return {
+      reply: { text: `Got it — moved ${linesText(last.lines)} from ${from} to ${tableName(data, newTable)}.`, execute: plan, undoable: true, card: billCard(world, newTable, split, last.lines) },
+      ctx: { ...rememberTable(ctx, newTable, world), lastAdd: { ...last, tableId: newTable, split, at: world.now.getTime() } },
+    };
+  }
+
+  const target = newTable ?? last.tableId;
+  const targetSplit = newTable !== null ? splitFor(world, newTable) : last.split;
+  const newLines = parsed.lines.map(toLine);
+  let replace = last.lines;
+  if (last.lines.length > 1) {
+    const cat = parsed.lines[0]!.item.catId;
+    const same = last.lines.find((l) => index.entries.find((e) => e.name === l.name)?.catId === cat);
+    replace = [same ?? last.lines[last.lines.length - 1]!];
+  }
+  const explicitQty = words.some((t) => isNumberToken(t));
+  if (!explicitQty && newLines.length === 1 && replace.length === 1) newLines[0] = { ...newLines[0]!, qty: replace[0]!.qty };
+  const plan: Plan = {
+    kind: "batch",
+    plans: [
+      { kind: "removeItems", tableId: last.tableId, split: last.split, items: replace.map((l) => ({ name: l.name, qty: l.qty })) },
+      { kind: "addItems", tableId: target, split: targetSplit, items: newLines },
+    ],
+  };
+  const kept = last.lines.filter((l) => !replace.includes(l));
+  const card = target === last.tableId ? billCard(world, target, targetSplit, newLines, replace.map((l) => ({ name: l.name, qty: l.qty }))) : billCard(world, target, targetSplit, newLines);
+  return {
+    reply: { text: `Got it — changed ${linesText(replace)} to ${linesText(newLines)}${newTable !== null ? ` on ${tableName(data, target)}` : ""}.`, execute: plan, undoable: true, card },
+    ctx: { ...rememberTable(ctx, target, world), lastLines: newLines, lastAdd: { tableId: target, split: targetSplit, lines: target === last.tableId ? [...kept, ...newLines] : newLines, at: world.now.getTime() } },
+  };
+}
+
+/** "change pares to mami on table 2", "palitan ng mami ang pares" */
+function swapReply(toks: string[], world: World, ctx: AgentContext, index: MenuIndex, explicitTable: number | null, rest: string[]): RespondResult | null {
+  if (!has(toks, "change", "palitan", "replace", "swap", "switch")) return null;
+  if (rest.some(isNumberToken)) return null;
+  const at = rest.findIndex((t, i) => i > 0 && ["to", "with", "into", "ng", "for"].includes(t));
+  if (at < 0) return null;
+  const strip = (xs: string[]) => xs.filter((t) => !["change", "palitan", "replace", "swap", "switch", "the", "ang", "yung", "sa", "on", "it"].includes(t));
+  const left = findMenuItem(strip(rest.slice(0, at)), index);
+  const right = findMenuItem(strip(rest.slice(at + 1)), index);
+  if (!left || !right || left.entry.name === right.entry.name) return null;
+  const tableId = explicitTable ?? contextTable(world, ctx);
+  if (tableId === null) return null;
+  const split = splitFor(world, tableId);
+  // "palitan ng mami ang pares" puts the new item first.
+  const items = world.data.tables[tableId]?.[split]?.items ?? [];
+  let oldName = left.entry.name;
+  let newEntry = right.entry;
+  if (!items.some((i) => i.name === oldName) && items.some((i) => i.name === right.entry.name)) {
+    oldName = right.entry.name;
+    newEntry = left.entry;
+  }
+  const line = items.find((i) => i.name === oldName);
+  if (!line) return { reply: { text: `${tableName(world.data, tableId)} doesn’t have ${oldName} on its bill.`, tone: "warn" }, ctx };
+  const newLine: Line = { name: newEntry.name, price: newEntry.price, qty: line.qty, ...(line.note ? { note: line.note } : {}) };
+  const plan: Plan = { kind: "batch", plans: [{ kind: "setQty", tableId, split, name: line.name, qty: 0 }, { kind: "addItems", tableId, split, items: [newLine] }] };
+  return {
+    reply: { text: `Changed ${line.qty}× ${line.name} to ${newEntry.name} on ${tableName(world.data, tableId)}.`, execute: plan, undoable: true, card: billCard(world, tableId, split, [newLine], [{ name: line.name, qty: "all" }]) },
+    ctx: { ...rememberTable(ctx, tableId, world), lastLines: [newLine] },
+  };
+}
+
+// ---------- names (utang) ----------
+
+const NAME_STOP = new Set(["table", "utang", "paid", "pay", "payment", "na", "po", "sa", "ng", "gcash", "maya", "cash", "today", "the", "lahat", "all", "full", "pesos", "peso", "for", "and", "ang", "yung", "nya", "niya", "ko", "mo", "credit", "owes", "owe", "list", "is", "has", "how", "much", "magkano", "lang", "pa", "ba"]);
+
+function titleName(words: string[]): string {
+  return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+/** A known utang customer mentioned anywhere, else a name after ni/kay/si/for/to. */
+function customerFrom(raw: string, world: World): { name: string; known: boolean } | null {
+  const lower = ` ${raw.toLowerCase().replace(/[^a-zñ0-9\s'.-]/g, " ")} `;
+  const known = utangAccounts(world.data.history).sort((a, b) => b.name.length - a.name.length);
+  for (const a of known) if (lower.includes(` ${a.key} `)) return { name: a.name, known: true };
+  const m = /\b(?:ni|kay|si|for|to|under|named|name is|pangalan|customer)\s+([a-zñ][a-zñ.'-]*(?:\s+[a-zñ][a-zñ.'-]*){0,2})/i.exec(raw);
+  if (!m) return null;
+  const words: string[] = [];
+  for (const w of m[1]!.toLowerCase().split(/\s+/)) {
+    if (NAME_STOP.has(w) || /^\d/.test(w)) break;
+    words.push(w);
+  }
+  if (!words.length) return null;
+  return { name: titleName(words), known: false };
+}
+
+function askName(ctx: AgentContext, question: string, resume: (name: string, w: World, c: AgentContext) => AgentReply | Resumed): RespondResult {
+  return { reply: { text: question }, ctx: { ...ctx, pending: { kind: "needName", resume } } };
+}
+
+/** Parses a reply to "whose utang?" into a name. */
+export function nameFromAnswer(raw: string): string | null {
+  const words = raw.trim().replace(/[^A-Za-zÑñ\s'.-]/g, " ").split(/\s+/).filter(Boolean);
+  const cleaned = words.filter((w) => !["si", "ni", "kay", "it", "is", "its", "name", "the", "for", "to", "po", "utang", "ni", "yung"].includes(w.toLowerCase()));
+  if (!cleaned.length || cleaned.length > 4) return null;
+  return titleName(cleaned.map((w) => w.toLowerCase()));
+}
+
+// ---------- utang ----------
+
+function utangReply(raw: string, toks: string[], norm: string, world: World, ctx: AgentContext, explicitTable: number | null, rest: string[]): RespondResult | null {
+  const data = world.data;
+  const cust = customerFrom(raw, world);
+  const utangWord = has(toks, "utang", "credit", "owe", "owes", "owed", "debt", "tab");
+  const payWord = has(toks, "paid", "pay", "pays", "payment", "settle", "settled");
+  const question = has(toks, "who", "sino", "how", "much", "many", "what", "list", "show", "check", "whats") || raw.trim().endsWith("?");
+
+  // Payment toward utang: "Ben paid 100", "nagbayad si Ben ng 200 gcash", "bayad ni Ben lahat"
+  if (payWord && explicitTable === null && cust?.known && (utangWord || !question)) {
+    const account = findAccount(data.history, cust.name)!;
+    if (account.balance <= 0) return { reply: { text: `${account.name} doesn’t owe anything right now.` }, ctx };
+    const nums = rest.filter(isNumberToken).map(Number);
+    const all = has(toks, "all", "lahat", "full", "everything", "buo", "fully");
+    const amount = all || !nums.length ? account.balance : Math.min(Math.max(...nums), account.balance);
+    const method = has(toks, "gcash") ? "gcash" : has(toks, "maya") ? "maya" : "cash";
+    const left = account.balance - amount;
+    return confirmReply(ctx, { kind: "payUtang", customer: account.name, amount, method },
+      `Record ${peso(amount)}${method !== "cash" ? ` (${method === "gcash" ? "GCash" : "Maya"})` : ""} from ${account.name} for utang? ${left > 0 ? `${peso(left)} will be left.` : "That pays it all off."}`,
+      "Record payment", `${account.name} paid ${peso(amount)}. ${left > 0 ? `${peso(left)} still owed.` : "All paid off!"}`, true);
+  }
+  if (!utangWord) return null;
+
+  // Charge a table's bill to someone's utang: "table 2 utang ni Ben", "ilista mo kay Ben table 3"
+  const tableId = explicitTable ?? (question ? null : contextTable(world, ctx));
+  if (tableId !== null && !question) {
+    const sp = extractSplit(rest);
+    if (!cust) {
+      return askName(ctx, `Whose utang is ${tableName(data, tableId)}’s bill? Tell me the customer’s name.`, (name, w, c) => payReply(w, tableId, sp.split, undefined, c, "utang", name));
+    }
+    return payReply(world, tableId, sp.split, undefined, rememberTable(ctx, tableId, world), "utang", cust.name);
+  }
+
+  // Questions: "sino may utang?", "how much does Ben owe?"
+  if (cust?.known) {
+    const a = findAccount(data.history, cust.name)!;
+    if (a.balance <= 0) return { reply: { text: `${a.name} has no unpaid utang.` }, ctx };
+    return {
+      reply: {
+        text: `${a.name} owes ${peso(a.balance)} from ${plural(a.open.length, "order")}${a.since ? `, the oldest on ${fmtDayLabel(new Date(a.since))}` : ""}.`,
+        card: { kind: "list", title: `${a.name}’s utang`, rows: a.open.map((t) => ({ label: `${fmtDayLabel(new Date(t.ts))} · ${tableName(data, t.table)}`, value: peso(utangBalance(t)), sub: linesText(t.items) })) },
+        suggestions: [`${a.name} paid ${a.balance}`],
+        link: { label: "Open utang list", route: { name: "utang" } },
+      },
+      ctx,
+    };
+  }
+  const owing = utangAccounts(data.history).filter((a) => a.balance > 0);
+  if (!owing.length) return { reply: { text: "Nobody owes you right now.", link: { label: "Open utang list", route: { name: "utang" } } }, ctx };
+  const total = owing.reduce((s, a) => s + a.balance, 0);
+  void norm;
+  return {
+    reply: {
+      text: `${plural(owing.length, "person", "people")} ${owing.length === 1 ? "owes" : "owe"} you ${peso(total)} in total.`,
+      card: { kind: "list", title: "Utang", rows: owing.map((a) => ({ label: a.name, value: peso(a.balance), sub: a.since ? `since ${fmtDayLabel(new Date(a.since))}` : undefined })) },
+      link: { label: "Open utang list", route: { name: "utang" } },
+    },
+    ctx,
+  };
+}
+
+// ---------- sold out ----------
+
+const SOLD_FILLER = new Set(["soldout", "na", "ang", "yung", "is", "are", "we", "out", "of", "wala", "nang", "ng", "available", "again", "back", "in", "stock", "restock", "restocked", "meron", "may", "mayroon", "ulit", "the", "on", "now", "po", "mark", "set", "as", "it", "item", "menu", "have", "today", "tonight", "pa", "ba", "still", "do", "any", "left", "what", "which", "whats", "list", "show", "items"]);
+
+function soldOutReply(raw: string, toks: string[], world: World, ctx: AgentContext, index: MenuIndex): RespondResult | null {
+  const data = world.data;
+  const lower = raw.toLowerCase();
+  const outWord = has(toks, "soldout") || /\b(wala na(ng)?|out of)\b/.test(lower);
+  const backWord = /\b(available|in stock|back in stock|restock(ed)?|meron na ulit|meron ulit|may .+ na ulit|mayroon na ulit|back on the menu)\b/.test(lower);
+  const question = /\?\s*$/.test(raw) || /^(is|are|do we have|meron pa ba|may .+ pa ba|mayroon pa ba|what|which|anong|ano)\b/.test(lower.trim());
+  if (!outWord && !backWord) return null;
+  if (has(toks, "table") || has(toks, "tables")) return null;
+  const itemToks = toks.filter((t) => !SOLD_FILLER.has(t));
+  const m = itemToks.length ? findMenuItem(itemToks, index) : null;
+  const soldNow = data.menu.flatMap((c) => c.items).filter((i) => isSoldOut(i, data.settings, world.now));
+  if (!m) {
+    if (question || !itemToks.length) {
+      return { reply: { text: soldNow.length ? `Sold out today: ${soldNow.map((i) => i.name).join(", ")}.` : "Nothing is marked sold out today." }, ctx };
+    }
+    return outWord && has(toks, "soldout") ? { reply: { text: "Which menu item is sold out?" }, ctx } : null;
+  }
+  const item = data.menu.find((c) => c.id === m.entry.catId)?.items.find((i) => i.id === m.entry.id);
+  if (!item) return null;
+  const isOut = isSoldOut(item, data.settings, world.now);
+  if (question) return { reply: { text: isOut ? `${item.name} is marked sold out today.` : `${item.name} is available.` }, ctx };
+  const soldOut = outWord && !backWord;
+  if (soldOut === isOut) return { reply: { text: soldOut ? `${item.name} is already marked sold out.` : `${item.name} is already available.` }, ctx };
+  const tl = isTaglish(raw);
+  return {
+    reply: {
+      text: soldOut
+        ? tl ? `Sige, ubos na ang ${item.name} ngayon. Sasabihan kita kapag may umorder.` : `Marked ${item.name} as sold out for today. I’ll warn you if someone orders it.`
+        : tl ? `Okay, available na ulit ang ${item.name}.` : `${item.name} is available again.`,
+      execute: { kind: "setSoldOut", catId: m.entry.catId, itemId: m.entry.id, soldOut },
+      undoable: true,
+    },
+    ctx,
+  };
+}
+
+// ---------- notes ----------
+
+const NOTE_TRIGGERS = new Set(["walang", "no", "without", "less", "konti", "konting", "kaunti", "kaunting", "extra", "hindi", "not", "separate", "hiwalay", "maanghang", "spicy", "mild", "well", "light", "heavy", "malamig", "mainit", "cold", "hot"]);
+const NOTE_STOP = new Set(["and", ",", "for", "sa", "to", "para", "on", "table", "tables", "at", "tapos", "then", "plus", "also"]);
+
+interface NoteHit {
+  at: number;
+  text: string;
+  len: number;
+}
+
+/** Finds kitchen notes like "walang sibuyas", "extra sabaw", "no onions" (words that aren't menu items). */
+export function extractNotes(toks: string[], index: MenuIndex): { notes: NoteHit[]; rest: string[] } {
+  const notes: NoteHit[] = [];
+  const rest: string[] = [];
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i]!;
+    const next = toks[i + 1];
+    const standalone = t === "maanghang" || t === "spicy" || t === "mild";
+    if (NOTE_TRIGGERS.has(t) && (standalone || (next && !isNumberToken(next) && !index.vocab.has(next) && !NOTE_STOP.has(next) && next !== "more" && next !== "na"))) {
+      const words = [t];
+      let j = i + 1;
+      while (j < toks.length && !isNumberToken(toks[j]) && !index.vocab.has(toks[j]!) && !NOTE_STOP.has(toks[j]!) && words.length < 4) words.push(toks[j++]!);
+      if (standalone || words.length >= 2) {
+        notes.push({ at: rest.length, text: words.join(" "), len: words.length });
+        i = j - 1;
+        continue;
+      }
+    }
+    rest.push(t);
+  }
+  return { notes, rest };
+}
+
+function noteText(n: string): string {
+  return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
+function setNoteReply(toks: string[], world: World, ctx: AgentContext, index: MenuIndex, explicitTable: number | null, rest: string[]): RespondResult | null {
+  const noteWord = has(toks, "note", "notes", "bilin", "paalala", "request");
+  const { notes, rest: itemToks } = extractNotes(rest.filter((t) => !["note", "notes", "bilin", "paalala", "request", "add", "put", "set", "for", "on", "sa", "ang", "yung", "the"].includes(t)), index);
+  if (!noteWord && !notes.length) return null;
+  const tableId = explicitTable ?? contextTable(world, ctx);
+  if (tableId === null) return noteWord ? askTable(ctx, world, "Which table is that note for?", () => ({ text: "Okay — now tell me the note again with the item, like “note pares walang sibuyas”." })) : null;
+  const split = splitFor(world, tableId);
+  const items = world.data.tables[tableId]?.[split]?.items ?? [];
+  const parsed = parseItems(itemToks, index);
+  const explicitQty = itemToks.some(isNumberToken);
+  // Item not on the bill (or a quantity given): this is an order with a note, not a note on an existing line.
+  if (!noteWord && (explicitQty || has(toks, "add", "order") || !parsed.lines.length || !parsed.lines.every((l) => items.some((i) => i.name === l.item.name)))) return null;
+  let text = notes.map((n) => n.text).join(", ");
+  if (!text) text = itemToks.filter((t) => !parsed.lines.some((l) => l.heard.split(" ").includes(t))).join(" ");
+  if (!text) return { reply: { text: "What should the note say? For example “note pares walang sibuyas”." }, ctx };
+  const target = parsed.lines[0]?.item.name ?? (items.length === 1 ? items[0]!.name : null);
+  if (!target || !items.some((i) => i.name === target)) {
+    return { reply: { text: items.length ? `Which item is “${text}” for? ${tableName(world.data, tableId)} has ${items.map((i) => i.name).join(", ")}.` : `${tableName(world.data, tableId)} has no items yet.`, tone: "warn" }, ctx };
+  }
+  return {
+    reply: { text: `Noted: ${target} on ${tableName(world.data, tableId)} — “${noteText(text)}”.`, execute: { kind: "setNote", tableId, split, name: target, note: noteText(text) }, undoable: true },
+    ctx: rememberTable(ctx, tableId, world),
+  };
+}
+
+// ---------- serving ----------
+
+function serveReply(raw: string, toks: string[], world: World, ctx: AgentContext, index: MenuIndex, explicitTable: number | null, rest: string[]): RespondResult | null {
+  const data = world.data;
+  const lower = raw.toLowerCase();
+  const waitQ = has(toks, "waiting", "naghihintay", "longest", "matagal", "nag-aantay", "naghihintay") || (has(toks, "served", "serve") && has(toks, "not", "hindi", "yet", "pa", "which", "who", "sino", "what"));
+  if (waitQ && !(explicitTable !== null && !has(toks, "not", "hindi", "yet", "pa"))) {
+    const rows = openTables(data)
+      .map(({ t, splits }) => ({ t, opened: tableOpenedAt(splits), toServe: tableUnserved(splits) }))
+      .filter((x) => x.toServe > 0 || has(toks, "longest", "matagal", "waiting"))
+      .sort((a, b) => (a.opened ?? "z").localeCompare(b.opened ?? "z"));
+    if (!rows.length) return { reply: { text: "Everyone has been served. 👍" }, ctx };
+    return {
+      reply: {
+        text: `${plural(rows.filter((r) => r.toServe).length, "table")} still waiting for food.${rows[0]!.opened ? ` ${tableName(data, rows[0]!.t.id)} has waited longest (${fmtElapsed(rows[0]!.opened, world.now)}).` : ""}`,
+        card: { kind: "list", title: "Waiting", rows: rows.map((r) => ({ label: tableName(data, r.t.id), value: r.opened ? fmtElapsed(r.opened, world.now) : "", sub: r.toServe ? `${plural(r.toServe, "item")} to serve` : "All served" })) },
+      },
+      ctx,
+    };
+  }
+  if (!has(toks, "served", "serve")) return null;
+  if (has(toks, "what", "whats", "which") || /what do (we|you) serve/.test(lower)) return null;
+  const tableId = explicitTable ?? contextTable(world, ctx);
+  if (tableId === null) return askTable(ctx, world, "Which table was served?", (tid, w) => serveAll(w, tid, []));
+  const parsed = parseItems(rest.filter((t) => !["served", "serve", "na", "already", "is", "are", "all", "lahat", "the", "ang", "yung", "been", "has", "have", "mark", "as"].includes(t)), index);
+  return { reply: serveAll(world, tableId, parsed.lines.map((l) => l.item.name)), ctx: rememberTable(ctx, tableId, world) };
+}
+
+function serveAll(world: World, tableId: number, names: string[]): AgentReply {
+  const splits = world.data.tables[tableId] ?? [];
+  const name = tableName(world.data, tableId);
+  if (!tableUnserved(splits)) return { text: splits.some((s) => s.items.length) ? `Everything on ${name} is already served.` : `${name} has no order.` };
+  const known = names.filter((n) => splits.some((s) => s.items.some((i) => i.name === n)));
+  return {
+    text: known.length ? `Marked ${known.join(", ")} on ${name} as served.` : `Marked everything on ${name} as served.`,
+    execute: { kind: "serve", tableId, ...(known.length ? { names: known } : {}) },
+    undoable: true,
+  };
+}
+
+// ---------- expenses & profit ----------
+
+const EXPENSE_FILLER = new Set(["expense", "expenses", "spent", "spend", "bought", "buy", "purchase", "purchased", "for", "sa", "ng", "on", "of", "pesos", "peso", "add", "record", "new", "a", "an", "the", "worth", "ko", "kami", "we", "i", "today", "po", "na", "ang", "an", "paid", "pay", "pambili", "pang"]);
+
+function expenseReply(raw: string, toks: string[], norm: string, world: World, ctx: AgentContext): RespondResult | null {
+  if (!has(toks, "expense", "expenses", "spent", "spend", "bought", "purchase", "purchased", "spending")) return null;
+  const data = world.data;
+  const question = has(toks, "how", "much", "what", "whats", "list", "show", "total", "magkano") || raw.trim().endsWith("?");
+  const nums = toks.filter(isNumberToken).map(Number).filter((n) => n > 0);
+  if (nums.length && !question) {
+    const amount = nums[0]!;
+    const what = titleName(toks.filter((t) => !EXPENSE_FILLER.has(t) && !isNumberToken(t)).slice(0, 5)) || "Expense";
+    const todayTotal = expensesForPeriod(data.expenses, todaySpec(), data.settings, world.now).reduce((s, e) => s + e.amount, 0) + amount;
+    return {
+      reply: { text: `Saved expense: ${peso(amount)} for ${what}. Expenses today: ${peso(todayTotal)}.`, execute: { kind: "addExpense", amount, what }, undoable: true },
+      ctx,
+    };
+  }
+  const spec = extractPeriod(toks, norm, world) ?? todaySpec();
+  const list = expensesForPeriod(data.expenses, spec, data.settings, world.now);
+  const when = periodPhrase(spec, world);
+  if (!list.length) return { reply: { text: `No expenses recorded ${when}. Say “expense 300 for ice” to add one.` }, ctx };
+  const total = list.reduce((s, e) => s + e.amount, 0);
+  return {
+    reply: {
+      text: `Expenses ${when}: ${peso(total)} (${plural(list.length, "item")}).`,
+      card: { kind: "list", title: `Expenses · ${when}`, rows: list.slice(-12).reverse().map((e) => ({ label: e.what, value: peso(e.amount), sub: `${fmtDayLabel(new Date(e.ts))} ${fmtTime(e.ts)}` })) },
+    },
+    ctx,
+  };
+}
+
+function moneyReply(toks: string[], norm: string, world: World, ctx: AgentContext, explicitTable: number | null): RespondResult | null {
+  const profitQ = has(toks, "profit", "net", "profits");
+  const methodQ = has(toks, "gcash", "maya") && !has(toks, "paid", "pay") && explicitTable === null;
+  const cashQ = has(toks, "cash") && has(toks, "how", "much", "total") && explicitTable === null && !has(toks, "change");
+  if (!profitQ && !methodQ && !cashQ) return null;
+  const data = world.data;
+  const spec = extractPeriod(toks, norm, world) ?? todaySpec();
+  const m = moneyBreakdown(data.history, data.expenses, spec, data.settings, world.now);
+  const when = periodPhrase(spec, world);
+  const collected = m.collected.cash + m.collected.gcash + m.collected.maya;
+  const text = profitQ
+    ? `Profit ${when}: ${m.profit < 0 ? "−" : ""}${peso(Math.abs(m.profit))} — sales ${peso(m.salesTotal)} minus expenses ${peso(m.expenses)}.`
+    : `${when.charAt(0).toUpperCase() + when.slice(1)}: Cash ${peso(m.sales.cash)}, GCash ${peso(m.sales.gcash)}, Maya ${peso(m.sales.maya)}${m.sales.utang ? `, Utang ${peso(m.sales.utang)}` : ""}.`;
+  return {
+    reply: {
+      text,
+      card: {
+        kind: "stats",
+        title: `Money · ${when}`,
+        stats: [
+          { label: "Sales", value: peso(m.salesTotal) },
+          { label: "Expenses", value: peso(m.expenses) },
+          { label: "Profit", value: `${m.profit < 0 ? "−" : ""}${peso(Math.abs(m.profit))}` },
+        ],
+        rows: [
+          { label: "Cash", value: peso(m.sales.cash) },
+          { label: "GCash", value: peso(m.sales.gcash) },
+          { label: "Maya", value: peso(m.sales.maya) },
+          ...(m.sales.utang ? [{ label: "Sold on utang", value: peso(m.sales.utang) }] : []),
+          ...(collected ? [{ label: "Utang collected", value: peso(collected) }] : []),
+          { label: "Money received", value: peso(m.received) },
+        ],
+      },
+    },
+    ctx,
   };
 }

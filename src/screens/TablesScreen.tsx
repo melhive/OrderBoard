@@ -1,11 +1,16 @@
 import { useEffect } from "react";
 import { useApp } from "../store/appStore";
-import { tableCount, tableTotal } from "../lib/bill";
+import { fmtElapsed, minutesSince, tableCount, tableOpenedAt, tableTotal, tableUnserved } from "../lib/bill";
 import { txnsForPeriod } from "../lib/businessDay";
 import { peso, plural } from "../lib/format";
+import { backupDue } from "../lib/money";
+import { exportAllData } from "../store/exports";
 import { haptic } from "../platform/haptics";
 import { TopBar } from "../ui/components";
-import { IconGear, IconPlus, IconX, LogoMark } from "../ui/Icons";
+import { IconClock, IconDownload, IconGear, IconPlus, IconX, LogoMark } from "../ui/Icons";
+
+/** Minutes after which a table with unserved items is flagged as waiting long. */
+const LONG_WAIT_MIN = 20;
 import { useMinuteTick } from "../ui/hooks";
 
 export function TablesScreen() {
@@ -40,6 +45,27 @@ export function TablesScreen() {
         </button>
       </TopBar>
       <main className="screen-body with-nav">
+        {backupDue(data.settings, data.history) && (
+          <div className="card banner" role="status">
+            <span className="sico green">
+              <IconDownload />
+            </span>
+            <div className="banner-text">
+              <b>Save a backup?</b>
+              <span>
+                {data.settings.lastBackupAt ? `Your last backup was ${plural(Math.floor(minutesSince(data.settings.lastBackupAt) / 1440), "day")} ago.` : "You haven’t saved a backup yet."} All sales live only on this phone.
+              </span>
+              <div className="banner-actions">
+                <button className="btn btn-green btn-small" onClick={() => void exportAllData()}>
+                  Back up now
+                </button>
+                <button className="btn btn-ghost btn-small" onClick={() => useApp.getState().snoozeBackup(3)}>
+                  Later
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="card today-card" aria-label="Today at a glance">
           <div>
             <div className="stat-n green">{peso(todayTotal)}</div>
@@ -62,22 +88,25 @@ export function TablesScreen() {
             const open = count > 0;
             const bills = (splits ?? []).filter((sp) => sp.items.length).length;
             const label = t.custom ? t.name : `Table ${t.name}`;
+            const openedAt = open ? tableOpenedAt(splits) : null;
+            const toServe = open ? tableUnserved(splits) : 0;
+            const longWait = !!openedAt && toServe > 0 && minutesSince(openedAt) >= LONG_WAIT_MIN;
             return (
               <div key={t.id} style={{ position: "relative" }}>
                 <button
-                  className={`tcard${open ? " open" : ""}${settled === t.id ? " settled" : ""}`}
+                  className={`tcard${open ? " open" : ""}${longWait ? " waiting" : ""}${settled === t.id ? " settled" : ""}`}
                   onClick={() => {
                     haptic.tap();
                     openTable(t.id);
                   }}
-                  aria-label={`${label}${open ? `, ${peso(tableTotal(splits))}` : ", empty"}`}
+                  aria-label={`${label}${open ? `, ${peso(tableTotal(splits))}` : ", empty"}${toServe ? `, ${toServe} to serve` : ""}`}
                 >
                   <div className="tcard-top">
                     <div style={{ minWidth: 0 }}>
                       <div className="tcard-kicker">{t.custom ? "Order" : "Table"}</div>
                       {t.custom ? <div className="tcard-name">{t.name}</div> : <div className="tcard-num">{t.name}</div>}
                     </div>
-                    {open && <span className="pill">Open</span>}
+                    {open && <span className={`pill${toServe ? "" : " ok"}`}>{toServe ? `${toServe} to serve` : "Served"}</span>}
                   </div>
                   <div className="tcard-bottom">
                     {open ? (
@@ -87,6 +116,11 @@ export function TablesScreen() {
                           {plural(count, "item")}
                           {bills > 1 ? ` · ${bills} bills` : ""}
                         </div>
+                        {openedAt && (
+                          <div className={`tcard-wait${longWait ? " long" : ""}`}>
+                            <IconClock /> {fmtElapsed(openedAt)}
+                          </div>
+                        )}
                       </>
                     ) : (
                       <span className="status">

@@ -13,7 +13,6 @@ export interface ExecResult {
 
 export function executePlan(plan: Plan): ExecResult {
   const app = useApp.getState();
-  const d = app.data;
   switch (plan.kind) {
     case "undo": {
       const label = app.undo();
@@ -23,6 +22,8 @@ export function executePlan(plan: Plan): ExecResult {
       const r = plan.route;
       if (r.name === "order") app.openTable(r.tableId);
       else if (r.name === "tables" || r.name === "summary") app.goTab(r.name);
+      else if (r.name === "talk") app.openTalk();
+      else if (r.name === "ask") app.openAsk();
       else {
         // Leave the chat, then open the screen (Back returns to where you were).
         if (currentRoute(app).name === "ask") app.back();
@@ -40,12 +41,28 @@ export function executePlan(plan: Plan): ExecResult {
     default:
       break;
   }
-
   app.checkpoint(plan.kind);
+  return apply(plan);
+}
+
+/** Applies a mutating plan (the caller has already recorded the undo checkpoint). */
+function apply(plan: Plan): ExecResult {
+  const app = useApp.getState();
+  const d = app.data;
   switch (plan.kind) {
+    case "undo":
+    case "navigate":
+    case "setTheme":
+    case "export":
+      return executeUnchecked(plan);
+    case "batch": {
+      let ok = true;
+      for (const p of plan.plans) ok = apply(p).ok && ok;
+      return { ok };
+    }
     case "addItems": {
       ensureTable(plan.tableId);
-      for (const it of plan.items) app.addItem(plan.tableId, it.name, it.price, it.qty, plan.split);
+      for (const it of plan.items) app.addItem(plan.tableId, it.name, it.price, it.qty, plan.split, it.note);
       return { ok: true };
     }
     case "removeItems": {
@@ -62,8 +79,9 @@ export function executePlan(plan: Plan): ExecResult {
     case "pay": {
       // Pay highest index first so earlier indexes stay valid.
       const order = [...plan.splits].sort((a, b) => b - a);
-      for (const i of order) app.markPaid(plan.tableId, i, order.length === 1 ? plan.cash : undefined);
-      return { ok: true };
+      let ok = true;
+      for (const i of order) ok = !!useApp.getState().markPaid(plan.tableId, i, order.length === 1 ? plan.cash : undefined, { method: plan.method, customer: plan.customer }) && ok;
+      return { ok };
     }
     case "clear":
       app.setData((dd) => ({
@@ -111,6 +129,30 @@ export function executePlan(plan: Plan): ExecResult {
     case "restoreTxn":
       app.restoreTxn(plan.txnId);
       return { ok: true };
+    case "payUtang":
+      return { ok: app.payUtang(plan.customer, plan.amount, plan.method) > 0 };
+    case "setSoldOut":
+      app.setSoldOut(plan.catId, plan.itemId, plan.soldOut);
+      return { ok: true };
+    case "setNote": {
+      const idx = useApp.getState().data.tables[plan.tableId]?.[plan.split]?.items.findIndex((i) => i.name === plan.name) ?? -1;
+      if (idx < 0) return { ok: false, text: `${plan.name} isn’t on that bill anymore.` };
+      app.setItemNote(plan.tableId, plan.split, idx, plan.note);
+      return { ok: true };
+    }
+    case "serve": {
+      const splits = useApp.getState().data.tables[plan.tableId] ?? [];
+      splits.forEach((sp, si) => {
+        if (plan.split !== undefined && si !== plan.split) return;
+        sp.items.forEach((it, ii) => {
+          if (!plan.names || plan.names.includes(it.name)) useApp.getState().setServed(plan.tableId, si, ii, true);
+        });
+      });
+      return { ok: true };
+    }
+    case "addExpense":
+      app.addExpense(plan.amount, plan.what);
+      return { ok: true };
     case "setBusinessName":
       app.updateSettings({ businessName: plan.name });
       return { ok: true };
@@ -118,6 +160,18 @@ export function executePlan(plan: Plan): ExecResult {
       app.updateSettings({ workStart: plan.start, workEnd: plan.end });
       return { ok: true };
   }
+}
+
+/** Non-mutating plans run inside a batch. */
+function executeUnchecked(plan: Plan): ExecResult {
+  const app = useApp.getState();
+  if (plan.kind === "navigate") {
+    const r = plan.route;
+    if (r.name === "order") app.openTable(r.tableId);
+    else if (r.name === "tables" || r.name === "summary") app.goTab(r.name);
+    else app.push(r);
+  } else if (plan.kind === "setTheme") app.setTheme(plan.theme);
+  return { ok: true };
 }
 
 function ensureTable(tableId: number) {

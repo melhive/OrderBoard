@@ -9,6 +9,7 @@ import { speechInputSupported, speechOutputSupported } from "../platform/voice";
 import { exportAllData } from "../store/exports";
 import { Segmented, Switch, TopBar } from "../ui/components";
 import {
+  IconBell,
   IconBook,
   IconCheck,
   IconChevron,
@@ -175,7 +176,20 @@ export function SettingsScreen() {
 
         <div className="section-title">Data &amp; backup</div>
         <div className="group">
-          <Row icon={<IconDownload />} tone="green" title="Export all data" sub="Save a full backup file — keep it off this phone" onClick={() => void exportAllData()} />
+          <Row
+            icon={<IconDownload />}
+            tone="green"
+            title="Export all data"
+            sub={settings.lastBackupAt ? `Last backup ${new Date(settings.lastBackupAt).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} — keep it off this phone` : "Save a full backup file — keep it off this phone"}
+            onClick={() => void exportAllData()}
+          />
+          <Row
+            icon={<IconBell />}
+            tone="green"
+            title="Backup reminder"
+            sub="Remind me when my last backup is over a week old"
+            trail={<Switch label="Backup reminder" on={settings.backupReminder} onChange={(backupReminder) => updateSettings({ backupReminder })} />}
+          />
           <Row icon={<IconUpload />} tone="gold" title="Import backup" sub="Replace everything with a backup file" onClick={() => void importBackupFlow()} />
         </div>
 

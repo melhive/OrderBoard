@@ -99,9 +99,16 @@ export function startListening(h: ListenHandlers, langIndex = 0): ListenSession 
 }
 
 let preferredVoice: SpeechSynthesisVoice | null = null;
-function pickVoice(): SpeechSynthesisVoice | null {
-  if (preferredVoice) return preferredVoice;
+let filipinoVoice: SpeechSynthesisVoice | null | undefined;
+function pickVoice(tagalog: boolean): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis?.getVoices() ?? [];
+  if (tagalog) {
+    if (filipinoVoice === undefined || (filipinoVoice === null && voices.length)) {
+      filipinoVoice = voices.find((v) => /^(fil|tl)(-|_|$)/i.test(v.lang)) ?? null;
+    }
+    if (filipinoVoice) return filipinoVoice;
+  }
+  if (preferredVoice) return preferredVoice;
   preferredVoice =
     voices.find((v) => v.lang === "en-PH") ??
     voices.find((v) => v.lang.startsWith("en") && /female|samantha|google/i.test(v.name)) ??
@@ -110,23 +117,55 @@ function pickVoice(): SpeechSynthesisVoice | null {
   return preferredVoice;
 }
 
-export function speak(text: string, onEnd?: () => void) {
+/** Text as it should be read aloud: pesos spelled out, symbols dropped. */
+export function forSpeech(text: string): string {
+  return text
+    .replace(/₱\s?([\d,]+)/g, "$1 pesos")
+    .replace(/(\d+)×/g, "$1 ")
+    .replace(/×/g, " ")
+    .replace(/w\//g, "with ")
+    .replace(/&/g, " and ")
+    .replace(/[“”"]/g, "")
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
+    .replace(/—/g, ", ");
+}
+
+export function speak(text: string, onEnd?: () => void, opts: { tagalog?: boolean } = {}) {
   if (!speechOutputSupported()) {
     onEnd?.();
     return;
   }
   const synth = window.speechSynthesis;
   synth.cancel();
-  const u = new SpeechSynthesisUtterance(text.replace(/₱\s?([\d,]+)/g, "$1 pesos").replace(/×/g, " "));
-  const v = pickVoice();
+  const u = new SpeechSynthesisUtterance(forSpeech(text));
+  const v = pickVoice(!!opts.tagalog);
   if (v) u.voice = v;
   u.lang = v?.lang ?? "en-US";
   u.rate = 1.05;
-  u.onend = () => onEnd?.();
-  u.onerror = () => onEnd?.();
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    onEnd?.();
+  };
+  u.onend = finish;
+  u.onerror = finish;
   synth.speak(u);
+  // Some Android voices never fire onend; don't let the conversation stall.
+  setTimeout(finish, 2500 + forSpeech(text).length * 90);
 }
 
 export function stopSpeaking() {
   if (speechOutputSupported()) window.speechSynthesis.cancel();
+}
+
+/** Keeps the screen on during Talk mode (where supported). Returns a release function. */
+export async function keepScreenOn(): Promise<() => void> {
+  try {
+    const nav = navigator as Navigator & { wakeLock?: { request(type: "screen"): Promise<{ release(): Promise<void> }> } };
+    const lock = await nav.wakeLock?.request("screen");
+    return () => void lock?.release().catch(() => {});
+  } catch {
+    return () => {};
+  }
 }

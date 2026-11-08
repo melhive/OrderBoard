@@ -4,8 +4,9 @@ import type { Period, Txn } from "../data/types";
 import { tableDisplayName } from "../lib/bill";
 import { businessDayKey, groupByDay, isSingleDay, parseISODate, periodLabel, summarize, txnsForPeriod } from "../lib/businessDay";
 import { fmtDayLabel, fmtLongDate, fmtTime, peso, plural } from "../lib/format";
+import { METHOD_LABEL, expensesForPeriod, methodOf, moneyBreakdown, utangAccounts, utangBalance } from "../lib/money";
 import { TopBar } from "../ui/components";
-import { IconCalendar, IconChevron, IconDownload, IconTrash, IconUndo } from "../ui/Icons";
+import { IconCalendar, IconCash, IconChevron, IconDownload, IconPlus, IconTrash, IconUndo, IconX } from "../ui/Icons";
 import { useMinuteTick } from "../ui/hooks";
 
 const PERIODS: { p: Period; label: string }[] = [
@@ -34,6 +35,8 @@ function TxnList({ txns }: { txns: Txn[] }) {
         .map((h) => {
           const open = expanded === h.id;
           const n = h.items.reduce((s, i) => s + i.qty, 0);
+          const m = methodOf(h);
+          const owed = utangBalance(h);
           return (
             <div key={h.id} className="txn">
               <button className="txn-row" onClick={() => toggleTxn(h.id)} aria-expanded={open}>
@@ -41,6 +44,7 @@ function TxnList({ txns }: { txns: Txn[] }) {
                 <span className="desc">
                   <b>{tableDisplayName(tableList, h.table)}</b>
                   <small>
+                    {m !== "cash" && <span className={`mtag ${m}`}>{m === "utang" ? `Utang · ${h.customer}` : METHOD_LABEL[m]}</span>}
                     {plural(n, "item")} · {h.items.map((i) => i.name).join(", ")}
                   </small>
                 </span>
@@ -57,10 +61,17 @@ function TxnList({ txns }: { txns: Txn[] }) {
                         <div key={i} className="txn-item">
                           <span>
                             {it.qty}× {it.name}
+                            {it.note && <small className="lnote"> · {it.note}</small>}
                           </span>
                           <span>{peso(it.price * it.qty)}</span>
                         </div>
                       ))}
+                      {m === "utang" && (
+                        <div className="txn-item">
+                          <span>Utang · {h.customer}</span>
+                          <span>{owed > 0 ? `${peso(owed)} still owed` : "Paid off"}</span>
+                        </div>
+                      )}
                       {h.cash !== undefined && (
                         <div className="txn-item">
                           <span>Cash {peso(h.cash)}</span>
@@ -103,6 +114,12 @@ export function SummaryScreen() {
   const best = summary.best.slice(0, 5);
   const maxBest = best[0]?.qty ?? 1;
   const todayKey = businessDayKey(new Date(), hours);
+  const money = moneyBreakdown(data.history, data.expenses, spec, hours);
+  const expenses = expensesForPeriod(data.expenses, spec, hours).slice().sort((a, b) => (a.ts < b.ts ? 1 : -1));
+  const accounts = utangAccounts(data.history).filter((a) => a.balance > 0);
+  const owedTotal = accounts.reduce((s, a) => s + a.balance, 0);
+  const collected = money.collected.cash + money.collected.gcash + money.collected.maya;
+  const appActions = useApp.getState();
 
   const customLabel =
     spec.period === "custom" && spec.from && spec.to
@@ -147,6 +164,79 @@ export function SummaryScreen() {
               </div>
             </div>
           </div>
+
+          <div className="section-title">Money</div>
+          <div className="card money">
+            {(["cash", "gcash", "maya"] as const).map((k) =>
+              k === "cash" || money.sales[k] ? (
+                <div key={k} className="money-row">
+                  <span>{METHOD_LABEL[k]}</span>
+                  <b>{peso(money.sales[k])}</b>
+                </div>
+              ) : null,
+            )}
+            {money.sales.utang > 0 && (
+              <div className="money-row">
+                <span>Sold on utang</span>
+                <b className="gold">{peso(money.sales.utang)}</b>
+              </div>
+            )}
+            {collected > 0 && (
+              <div className="money-row">
+                <span>Utang collected</span>
+                <b className="green">+{peso(collected)}</b>
+              </div>
+            )}
+            <div className="money-row">
+              <span>Expenses</span>
+              <b className={money.expenses ? "red" : ""}>{money.expenses ? `−${peso(money.expenses)}` : peso(0)}</b>
+            </div>
+            <div className="money-row total">
+              <span>Profit</span>
+              <b className={money.profit < 0 ? "red" : "green"}>{money.profit < 0 ? `−${peso(-money.profit)}` : peso(money.profit)}</b>
+            </div>
+            <div className="money-note">Profit = sales − expenses. Money received {peso(money.received)}.</div>
+            {expenses.length > 0 && (
+              <div className="expense-list">
+                {expenses.map((e) => (
+                  <div key={e.id} className="expense">
+                    <span className="time">{single ? fmtTime(e.ts) : fmtDayLabel(new Date(e.ts))}</span>
+                    <span className="what">{e.what}</span>
+                    <span className="amt">−{peso(e.amount)}</span>
+                    <button
+                      className="icon-btn"
+                      aria-label={`Delete expense ${e.what}`}
+                      onClick={() => {
+                        appActions.checkpoint("expense");
+                        appActions.deleteExpense(e.id);
+                        appActions.showToast({ text: `Expense “${e.what}” deleted`, action: { label: "Undo", run: () => useApp.getState().undo() } });
+                      }}
+                    >
+                      <IconX />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button className="btn btn-secondary btn-small add-expense" onClick={() => openDialog({ type: "add-expense" })}>
+              <IconPlus /> Add expense
+            </button>
+          </div>
+
+          {(accounts.length > 0 || data.history.some((h) => methodOf(h) === "utang")) && (
+            <button className="card utang-link" onClick={() => appActions.push({ name: "utang" })}>
+              <span className="sico gold">
+                <IconCash />
+              </span>
+              <span className="smain">
+                <b>Utang</b>
+                <span>{accounts.length ? `${peso(owedTotal)} unpaid · ${plural(accounts.length, "person", "people")}` : "Everyone has paid"}</span>
+              </span>
+              <span className="strail">
+                <IconChevron />
+              </span>
+            </button>
+          )}
 
           <div className="section-title">Best sellers</div>
           {best.length ? (
@@ -217,7 +307,7 @@ export function SummaryScreen() {
 
         <div className="section-title">Reports</div>
         <div className="actions-row">
-          <button className="btn btn-green" disabled={!txns.length} onClick={() => openDialog({ type: "export-menu" })}>
+          <button className="btn btn-green" disabled={!txns.length && !expenses.length} onClick={() => openDialog({ type: "export-menu" })}>
             <IconDownload /> Export
           </button>
           <button className="btn btn-secondary" disabled={!hasToday} onClick={() => askResetToday()}>

@@ -1,4 +1,5 @@
-import type { TableDef, Txn } from "../data/types";
+import type { Expense, TableDef, Txn } from "../data/types";
+import { METHOD_LABEL, methodOf, moneyBreakdown, expensesForPeriod } from "../lib/money";
 import {
   type Hours,
   type PeriodSpec,
@@ -16,7 +17,15 @@ export interface ReportInput {
   hours: Hours;
   businessName: string;
   tableList: TableDef[];
+  /** All expenses and full history (for utang collected in the period). Optional for older callers. */
+  expenses?: Expense[];
+  history?: Txn[];
   now?: Date;
+}
+
+function payLabel(h: Txn): string {
+  const m = methodOf(h);
+  return m === "utang" ? `Utang (${h.customer ?? ""})` : METHOD_LABEL[m];
 }
 
 function titleWord(spec: PeriodSpec): string {
@@ -50,6 +59,24 @@ export function buildCSV(input: ReportInput): { filename: string; csv: string } 
   rows.push(["Total Earnings (PHP)", summary.total]);
   rows.push(["Orders", summary.orders]);
   rows.push(["Items Sold", summary.itemsSold]);
+  const money = moneyBreakdown(input.history ?? txns, input.expenses ?? [], spec, hours, input.now);
+  rows.push([]);
+  rows.push(["MONEY"]);
+  rows.push(["Cash sales (PHP)", money.sales.cash]);
+  rows.push(["GCash sales (PHP)", money.sales.gcash]);
+  rows.push(["Maya sales (PHP)", money.sales.maya]);
+  rows.push(["Utang sales (PHP)", money.sales.utang]);
+  rows.push(["Utang collected (PHP)", money.collected.cash + money.collected.gcash + money.collected.maya]);
+  rows.push(["Money received (PHP)", money.received]);
+  rows.push(["Expenses (PHP)", money.expenses]);
+  rows.push(["Profit: sales - expenses (PHP)", money.profit]);
+  const exps = expensesForPeriod(input.expenses ?? [], spec, hours, input.now);
+  if (exps.length) {
+    rows.push([]);
+    rows.push(["EXPENSES"]);
+    rows.push(["Date", "Time", "What", "Amount (PHP)"]);
+    for (const e of exps) rows.push([new Date(e.ts).toLocaleDateString("en-PH"), fmtTime(e.ts), e.what, e.amount]);
+  }
   rows.push([]);
   rows.push(["BEST SELLERS"]);
   rows.push(["Item", "Qty Sold", "Revenue (PHP)"]);
@@ -57,16 +84,16 @@ export function buildCSV(input: ReportInput): { filename: string; csv: string } 
   rows.push([]);
   if (isSingleDay(spec)) {
     rows.push(["TRANSACTIONS"]);
-    rows.push(["Time", "Table", "Items", "Total (PHP)"]);
+    rows.push(["Time", "Table", "Items", "Paid by", "Total (PHP)"]);
     for (const h of summary.txns) {
-      rows.push([fmtTime(h.ts), tableDisplayName(tableList, h.table), h.items.map((i) => `${i.qty}x ${i.name}`).join("; "), h.total]);
+      rows.push([fmtTime(h.ts), tableDisplayName(tableList, h.table), h.items.map((i) => `${i.qty}x ${i.name}${i.note ? ` (${i.note})` : ""}`).join("; "), payLabel(h), h.total]);
     }
   } else {
     rows.push(["DAILY BREAKDOWN"]);
     rows.push(["Date", "Orders", "Total (PHP)"]);
     for (const d of groupByDay(txns, hours)) rows.push([fmtDayLabel(d.date), d.orders, d.total]);
   }
-  rows.push(["", "", "TOTAL", summary.total]);
+  rows.push(["", "", "", "TOTAL", summary.total]);
   // Leading BOM so Excel opens the peso sign and names correctly.
   const csv = "﻿" + rows.map((r) => r.map((f) => `"${String(f).replace(/"/g, '""')}"`).join(",")).join("\r\n");
   return { filename: `orderboard_${spec.period}_report_${dp.iso}.csv`, csv };
@@ -89,8 +116,8 @@ export function buildReportHTML(input: ReportInput): string {
   let detail: string;
   if (isSingleDay(spec)) {
     detailTitle = "Transactions";
-    detail = `<table class="pr-table"><thead><tr><th>Time</th><th>Table</th><th>Items</th><th class="num">Total</th></tr></thead><tbody>${summary.txns
-      .map((h) => `<tr><td>${fmtTime(h.ts)}</td><td>${esc(tableDisplayName(tableList, h.table))}</td><td>${h.items.map((i) => `${i.qty}x ${esc(i.name)}`).join(", ")}</td><td class="num">${peso(h.total)}</td></tr>`)
+    detail = `<table class="pr-table"><thead><tr><th>Time</th><th>Table</th><th>Items</th><th>Paid by</th><th class="num">Total</th></tr></thead><tbody>${summary.txns
+      .map((h) => `<tr><td>${fmtTime(h.ts)}</td><td>${esc(tableDisplayName(tableList, h.table))}</td><td>${h.items.map((i) => `${i.qty}x ${esc(i.name)}`).join(", ")}</td><td>${esc(payLabel(h))}</td><td class="num">${peso(h.total)}</td></tr>`)
       .join("")}</tbody></table>`;
   } else {
     detailTitle = "Daily Breakdown";
@@ -104,9 +131,34 @@ export function buildReportHTML(input: ReportInput): string {
     `<div class="pr-stats"><div class="pr-stat"><div class="pr-stat-n">${peso(summary.total)}</div><div class="pr-stat-l">Total Earnings</div></div>` +
     `<div class="pr-stat"><div class="pr-stat-n">${summary.orders}</div><div class="pr-stat-l">Orders</div></div>` +
     `<div class="pr-stat"><div class="pr-stat-n">${summary.itemsSold}</div><div class="pr-stat-l">Items Sold</div></div></div>` +
+    moneyHTML(input) +
     `<div class="pr-section-title">Best Sellers</div><table class="pr-table"><thead><tr><th>#</th><th>Item</th><th class="num">Qty</th><th class="num">Revenue</th></tr></thead><tbody>${bestRows}</tbody></table>` +
     `<div class="pr-section-title">${detailTitle}</div>${detail}` +
     `<div class="pr-footer">Generated ${gen} &middot; Order Board</div>`
+  );
+}
+
+function moneyHTML(input: ReportInput): string {
+  const m = moneyBreakdown(input.history ?? input.txns, input.expenses ?? [], input.spec, input.hours, input.now);
+  const collected = m.collected.cash + m.collected.gcash + m.collected.maya;
+  const row = (l: string, v: string, cls = "") => `<tr${cls ? ` class="${cls}"` : ""}><td>${l}</td><td class="num">${v}</td></tr>`;
+  const exps = expensesForPeriod(input.expenses ?? [], input.spec, input.hours, input.now);
+  return (
+    `<div class="pr-section-title">Money</div><table class="pr-table"><tbody>` +
+    row("Cash sales", peso(m.sales.cash)) +
+    (m.sales.gcash ? row("GCash sales", peso(m.sales.gcash)) : "") +
+    (m.sales.maya ? row("Maya sales", peso(m.sales.maya)) : "") +
+    (m.sales.utang ? row("Utang (sold on credit)", peso(m.sales.utang)) : "") +
+    (collected ? row("Utang collected", peso(collected)) : "") +
+    row("Money received", peso(m.received)) +
+    row("Expenses", `−${peso(m.expenses)}`) +
+    row("<b>Profit (sales − expenses)</b>", `<b>${peso(m.profit)}</b>`) +
+    `</tbody></table>` +
+    (exps.length
+      ? `<div class="pr-section-title">Expenses</div><table class="pr-table"><thead><tr><th>Date</th><th>What</th><th class="num">Amount</th></tr></thead><tbody>${exps
+          .map((e) => `<tr><td>${fmtDayLabel(new Date(e.ts))} ${fmtTime(e.ts)}</td><td>${esc(e.what)}</td><td class="num">${peso(e.amount)}</td></tr>`)
+          .join("")}</tbody></table>`
+      : "")
   );
 }
 
