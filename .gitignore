@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+*.log
+.DS_Store
+# Capacitor native projects are generated later; keep local build outputs out
+android/app/build/
+*.tsbuildinfo
