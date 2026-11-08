@@ -183,3 +183,20 @@ export function LogoMark({ size = 32, ...p }: P & { size?: number }) {
     </svg>
   );
 }
+
+export const IconWave = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
+  </Svg>
+);
+export const IconKeyboard = (p: P) => (
+  <Svg {...p}>
+    <rect x="2.5" y="6" width="19" height="12" rx="2" />
+    <path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10" />
+  </Svg>
+);
+export const IconBulb = (p: P) => (
+  <Svg {...p}>
+    <path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1.1 2V16h5v-.2c.1-.8.5-1.5 1.1-2A6 6 0 0 0 12 3z" />
+  </Svg>
+);

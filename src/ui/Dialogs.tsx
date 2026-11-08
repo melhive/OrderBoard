@@ -1,9 +1,12 @@
 import { AnimatePresence, motion } from "motion/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useApp, type Dialog } from "../store/appStore";
 import { tableDisplayName } from "../lib/bill";
 import { businessDayKey, periodLabel } from "../lib/businessDay";
 import { peso } from "../lib/format";
+import { findAccount, type UtangAccount } from "../lib/money";
+import type { MoneyMethod } from "../data/types";
+import { Segmented } from "./components";
 import { exportReport } from "../store/exports";
 import { useAgent } from "../agent/agentStore";
 import { IconFile, IconPrinter } from "./Icons";
@@ -389,6 +392,153 @@ function ConfirmClearChat() {
   );
 }
 
+const NOTE_PRESETS = ["Walang sibuyas", "Walang sili", "Extra sabaw", "Konting sabaw", "Maanghang", "Hindi maanghang", "Hiwalay ang sauce", "Take out"];
+
+function ItemNote({ tableId, split, itemIdx }: { tableId: number; split: number; itemIdx: number }) {
+  const line = useApp((s) => s.data.tables[tableId]?.[split]?.items[itemIdx]);
+  const [note, setNote] = useState(line?.note ?? "");
+  if (!line) return null;
+  const save = (v: string) => useApp.getState().setItemNote(tableId, split, itemIdx, v);
+  return (
+    <Modal title={`Note for ${line.qty}× ${line.name}`}>
+      <form
+        className="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save(note);
+        }}
+      >
+        <div className="chips wrap">
+          {NOTE_PRESETS.map((p) => (
+            <button type="button" key={p} className={`chip${note === p ? " active" : ""}`} onClick={() => setNote(note && note !== p ? `${note}, ${p.toLowerCase()}` : p)}>
+              {p}
+            </button>
+          ))}
+        </div>
+        <div>
+          <label className="field-label" htmlFor="note-text">Note</label>
+          <input id="note-text" className="field" maxLength={60} placeholder="e.g. walang sibuyas" value={note} onChange={(e) => setNote(e.target.value)} />
+        </div>
+        <Actions>
+          {line.note ? (
+            <button type="button" className="btn btn-secondary" onClick={() => save("")}>
+              Remove note
+            </button>
+          ) : (
+            <Cancel />
+          )}
+          <button type="submit" className="btn btn-primary">
+            Save
+          </button>
+        </Actions>
+      </form>
+    </Modal>
+  );
+}
+
+const EXPENSE_PRESETS = ["Ingredients", "Gas / LPG", "Ice", "Rice", "Supplies", "Rent", "Wages", "Transport"];
+
+function AddExpense() {
+  const [amount, setAmount] = useState("");
+  const [what, setWhat] = useState("");
+  const a = parsePrice(amount);
+  const ok = a !== null && a > 0 && what.trim().length > 0;
+  return (
+    <Modal title="Add an expense">
+      <form
+        className="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!ok) return;
+          const s = useApp.getState();
+          s.checkpoint("expense");
+          s.addExpense(a!, what);
+          s.showToast({ text: `Expense ${peso(a!)} for ${what.trim()} saved`, tone: "success", action: { label: "Undo", run: () => useApp.getState().undo() } });
+        }}
+      >
+        <div>
+          <label className="field-label" htmlFor="ex-amount">Amount (₱)</label>
+          <input id="ex-amount" className="field" type="number" inputMode="decimal" min={0} autoFocus placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </div>
+        <div>
+          <label className="field-label" htmlFor="ex-what">What for</label>
+          <input id="ex-what" className="field" maxLength={40} placeholder="e.g. Ice, LPG refill" value={what} onChange={(e) => setWhat(e.target.value)} />
+        </div>
+        <div className="chips wrap">
+          {EXPENSE_PRESETS.map((p) => (
+            <button type="button" key={p} className={`chip${what === p ? " active" : ""}`} onClick={() => setWhat(p)}>
+              {p}
+            </button>
+          ))}
+        </div>
+        <Actions>
+          <Cancel />
+          <button type="submit" className="btn btn-primary" disabled={!ok}>
+            Save
+          </button>
+        </Actions>
+      </form>
+    </Modal>
+  );
+}
+
+function UtangPay({ customer }: { customer: string }) {
+  const history = useApp((s) => s.data.history);
+  const account: UtangAccount | null = useMemo(() => findAccount(history, customer), [history, customer]);
+  const [amount, setAmount] = useState(account ? String(account.balance) : "");
+  const [method, setMethod] = useState<MoneyMethod>("cash");
+  if (!account) return null;
+  const a = parsePrice(amount);
+  const ok = a !== null && a > 0;
+  const over = ok && a! > account.balance;
+  return (
+    <Modal title={`${account.name} pays utang`}>
+      <p>
+        Owes <b>{peso(account.balance)}</b> in total.
+      </p>
+      <form
+        className="form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!ok) return;
+          const s = useApp.getState();
+          s.checkpoint("utang payment");
+          const applied = s.payUtang(account.name, Math.min(a!, account.balance), method);
+          s.closeDialog();
+          const left = account.balance - applied;
+          s.showToast({
+            text: `${account.name} paid ${peso(applied)}${left > 0 ? ` · ${peso(left)} left` : " · all paid"}${over ? ` · change ${peso(a! - account.balance)}` : ""}`,
+            tone: "success",
+            action: { label: "Undo", run: () => useApp.getState().undo() },
+          });
+        }}
+      >
+        <div>
+          <label className="field-label" htmlFor="up-amount">Amount paid (₱)</label>
+          <input id="up-amount" className="field" type="number" inputMode="decimal" min={0} value={amount} onChange={(e) => setAmount(e.target.value)} />
+          {over && <div className="field-hint">That’s more than owed — change {peso(a! - account.balance)}.</div>}
+        </div>
+        <Segmented<MoneyMethod>
+          id="up-method"
+          value={method}
+          onChange={setMethod}
+          options={[
+            { value: "cash", label: "Cash" },
+            { value: "gcash", label: "GCash" },
+            { value: "maya", label: "Maya" },
+          ]}
+        />
+        <Actions>
+          <Cancel />
+          <button type="submit" className="btn btn-primary" disabled={!ok}>
+            Record payment
+          </button>
+        </Actions>
+      </form>
+    </Modal>
+  );
+}
+
 function renderDialog(d: Dialog) {
   const s = useApp.getState();
   switch (d.type) {
@@ -424,6 +574,9 @@ function renderDialog(d: Dialog) {
     case "confirm-restore-backup": return <ConfirmRestoreBackup pending={d.pending} />;
     case "import-error": return <ImportError />;
     case "confirm-clear-chat": return <ConfirmClearChat />;
+    case "item-note": return <ItemNote tableId={d.tableId} split={d.split} itemIdx={d.itemIdx} />;
+    case "add-expense": return <AddExpense />;
+    case "utang-pay": return <UtangPay customer={d.customer} />;
   }
 }
 

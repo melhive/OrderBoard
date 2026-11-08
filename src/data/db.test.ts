@@ -84,3 +84,39 @@ describe("store persistence", () => {
     expect(reloaded.data.tables["1"]).toEqual([]);
   });
 });
+
+describe("v18 data", () => {
+  it("old data gets safe defaults for the new fields", () => {
+    const d = normalizeAppData(LEGACY_V15);
+    expect(d.expenses).toEqual([]);
+    expect(d.settings).toMatchObject({ backupReminder: true, lastBackupAt: null, backupSnoozeUntil: null });
+    expect(d.history[0]!.method).toBeUndefined();
+  });
+
+  it("keeps notes, serving, payment methods, utang, sold out and expenses through a backup", () => {
+    const d = normalizeAppData(LEGACY_V15);
+    d.tables["1"] = [{ items: [{ name: "Pares", price: 60, qty: 2, note: "Walang sibuyas", served: 1 }], openedAt: "2026-11-08T10:00:00.000Z" }];
+    d.history.push(
+      { id: 2, table: 1, items: [{ name: "Mami", price: 50, qty: 1 }], total: 50, ts: "2026-11-02T11:00:00.000Z", method: "gcash" },
+      { id: 3, table: 2, items: [{ name: "Mami", price: 50, qty: 2 }], total: 100, ts: "2026-11-03T11:00:00.000Z", method: "utang", customer: "Ben", payments: [{ ts: "2026-11-04T11:00:00.000Z", amount: 40, method: "maya" }] },
+    );
+    d.menu[0]!.items[0]!.soldOut = "2026-11-08";
+    d.expenses = [{ id: 7, ts: "2026-11-08T09:00:00.000Z", amount: 300, what: "LPG" }];
+    const restored = normalizeAppData(JSON.parse(JSON.stringify(toBackup(d))));
+    expect(restored).toEqual(d);
+  });
+
+  it("rejects junk in the new fields", () => {
+    const d = normalizeAppData({
+      ...LEGACY_V15,
+      tables: { "1": [{ items: [{ name: "Pares", price: 60, qty: 1, served: 9, note: 5 }], openedAt: "nope" }] },
+      history: [{ id: 1, table: 1, items: [], total: 10, ts: "2026-11-01T11:00:00.000Z", method: "bitcoin" }, { id: 2, table: 1, items: [], total: 10, ts: "2026-11-01T11:00:00.000Z", method: "utang", payments: [{ amount: -5 }] }],
+      expenses: [{ amount: "x" }, { ts: "2026-11-01T11:00:00.000Z", amount: 20 }],
+    });
+    expect(d.tables["1"]).toEqual([{ items: [{ name: "Pares", price: 60, qty: 1, served: 1 }] }]);
+    expect(d.history[0]!.method).toBeUndefined();
+    expect(d.history[1]).toMatchObject({ method: "utang", customer: "Customer" });
+    expect(d.history[1]!.payments).toBeUndefined();
+    expect(d.expenses).toEqual([expect.objectContaining({ amount: 20, what: "Expense" })]);
+  });
+});

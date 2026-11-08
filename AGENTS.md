@@ -23,7 +23,8 @@ Currency is PHP (₱), shown as whole pesos via `peso()`.
 - **v1–v15** (`legacy/index.html`, `legacy/sw.js`): a single hand-written HTML file storing everything in `localStorage` under `order_board_streetfood_v1`. It is kept **only as a behavioural reference**: don't edit it or ship it.
 - **v16** (this codebase, merged to `main`): React + TypeScript rebuild. Same features, a new design, IndexedDB storage, Ask Agent, voice, Android back button, legal screens.
 - **v17**: UI redesign (new logo/icons, grouped settings, order screen with sticky categories and a cart bar), Ask Agent as a full chat screen with saved history, and more agent abilities (Taglish, move table, change calculation, comparisons).
-- The version shown in the app is the **major** of `package.json` `version` (`17.0.0` → "v17"). When you ship user-visible changes, bump it and add an entry at the top of `CHANGELOG` in `src/data/changelog.ts`.
+- **v18**: utang (credit), Cash/GCash/Maya, expenses and profit, sold out, item notes, served marks and wait timers, backup reminder; Ask Agent knows the whole app (how-to), chats in Taglish, fixes mistakes, handles several commands at once and gives tips; Talk mode (hands-free voice); inline startup screen.
+- The version shown in the app is the **major** of `package.json` `version` (`18.0.0` → "v18"). When you ship user-visible changes, bump it and add an entry at the top of `CHANGELOG` in `src/data/changelog.ts`.
 
 ## Stack and commands
 
@@ -45,9 +46,9 @@ There is no browser in the agent sandbox. UI behaviour is verified by `src/App.t
 ## Source map
 
 ```
-index.html                 Vite entry (root #root, theme-color metas)
+index.html                 Vite entry: inline startup logo (#splash, faded out by main.tsx) + theme pre-paint from localStorage "ob-theme"
 vite.config.ts             base "./", PWA manifest + Workbox, vitest config
-public/                    icons (copied as-is)
+public/                    icons (copied as-is). Named app-icon-*.png so Android notices icon changes; rename again if the icon changes
 src/main.tsx               boot: load data → init store → render; SW registration; old-cache cleanup
 src/App.tsx                route → screen with slide transitions; nav, FAB, agent, dialogs, toast, welcome gate
 src/styles.css             all styles; design tokens on :root, light theme via [data-theme="light"]
@@ -60,6 +61,7 @@ src/data/
 src/lib/
   bill.ts                  totals, display names, addToItems
   businessDay.ts           business-day keys, periods, grouping, summarize()
+  money.ts                 payment methods, utang accounts/balances/allocation, expenses, profit, sold out, backupDue()
   format.ts                peso(), times, dates, plural, verify codes
 src/store/
   appStore.ts              Zustand store: data + UI state + all actions; persistence plumbing; undo stack
@@ -67,12 +69,14 @@ src/store/
 src/reports/reports.ts     CSV builder + printable letterhead HTML
 src/platform/              adapters to swap for Capacitor later: files.ts, haptics.ts, voice.ts
 src/agent/
-  engine.ts                respond(input, world, ctx) → reply (PURE; never mutates)
+  engine.ts                respond(input, world, ctx) → reply (PURE; never mutates); also insights()/statusLine()
+  knowledge.ts             how-to topics for every feature, small talk (EN/Taglish), isTaglish()
   menuMatch.ts, text.ts    tokenizing, number words, fuzzy/phonetic menu matching, mishearing synonyms
   executor.ts              applies a Plan to the store (checkpoint first → undoable)
   agentStore.ts            chat messages + conversation context
-  AskScreen.tsx            full-screen chat (route "ask"): scrollable saved history, cards, voice, confirm/undo
-src/screens/               Tables, Order, Summary, Settings, MenuEditor, InfoScreens (changelog/about/legal/welcome)
+  AskScreen.tsx            full-screen chat (route "ask"): scrollable saved history, cards, voice, confirm/undo, tip bar
+  TalkScreen.tsx           Talk mode (route "talk"): listen → answer aloud → listen again; yes/no by voice
+src/screens/               Tables, Order, Summary, Utang, Settings, MenuEditor, InfoScreens (changelog/about/legal/welcome)
 src/ui/                    components (TopBar, BottomNav, Switch, Segmented, Toast), Dialogs, Icons, hooks
 src/legal/content.ts       Privacy Policy + Terms text, LEGAL_VERSION
 legacy/                    v15 single-file app (reference only)
@@ -92,7 +96,13 @@ legacy/                    v15 single-file app (reference only)
 
 **Ask screen.** When opened from an order screen, `worldSnapshot()` looks below the `ask` route, so that table is the current table. Chat history (last 200 messages) is saved in Dexie `kv["chat"]` (`loadChat`/`saveChat` in `db.ts`, debounced in `main.tsx`) and restored with `useAgent.hydrate()`, which retires stale Yes/Undo buttons. It is not part of the full backup. This is disclosed in the Privacy Policy.
 
-**Voice.** `platform/voice.ts` uses the Web Speech API (en-PH, falls back to en-US). Chrome on Android needs internet for recognition (Google service); typing always works offline. Text-to-speech is optional (`settings.agent.voiceReplies`). Hands-free mode re-listens after each spoken reply.
+**Money model.** A sale is recorded when the bill is settled. `Txn.method` is missing for cash (all old records), or `gcash`/`maya`/`utang`. Utang sales count as sales on the day they were eaten. Their `payments[]` are money collected on the day paid. `lib/money.ts` turns this into per-period sales by method, collected utang, money received, expenses and profit (sales − expenses). Utang payments are applied oldest-first per customer (`allocateUtangPayment`). `Workspace.expenses` holds expenses. `MenuItem.soldOut` stores the business-day key it was marked, so it resets by itself the next day.
+
+**Open bills.** `Split.openedAt` is set when the first item arrives (see `withItems` in appStore) and drives the wait timers. `OrderItem.served` counts served units, and `note` is a kitchen note. Lines only merge when name, price and note all match. Both are stripped or kept as appropriate when paid.
+
+**Agent skill order** (in `respond`): pending follow-ups → multi-command split → help/small talk/how-to/tips → corrections ("no, table 4", "mami pala") → nav/theme/settings/export/menu → sold out → expenses → tables → utang → serving → notes → money → move/change/open/restore → queries → pay → split/clear/remove → swap → set qty → repeat → add (default). Follow-ups that need a confirmation return `{reply, ctx}` from `resume` (type `Resumed`) so the Yes button keeps working. `Plan` kind `batch` applies several plans as one undo step.
+
+**Voice.** `platform/voice.ts` uses the Web Speech API (en-PH, falls back to en-US). Chrome on Android needs internet for recognition (Google service); typing always works offline. Text-to-speech is optional (`settings.agent.voiceReplies`). Hands-free mode re-listens after each spoken reply. Talk mode (`TalkScreen`) is a dedicated loop that greets with `statusLine()` and the top tip, keeps the screen on (`keepScreenOn`), re-listens quietly twice on silence, then waits for a tap. It uses a Filipino TTS voice for Taglish replies when the phone has one. Everything said in Talk mode is also kept in the chat history.
 
 **PWA / updates.** Workbox precaches the build. `registerType: "autoUpdate"` activates new versions and reloads. The SW filename stays `sw.js`, so phones still running the legacy app pick up v16 as a normal SW update. `main.tsx` deletes the legacy `order-board-vNN` caches.
 
@@ -127,6 +137,7 @@ Run `pnpm test && pnpm typecheck` before declaring anything done.
 - [ ] `src/legal/content.ts`: set real `PUBLISHER` and `CONTACT_EMAIL` (currently `support@example.com`), have the text reviewed, and host the Privacy Policy at a public URL (needed for a Play Store listing).
 - [x] v16 merged to `main` (PR #1).
 - [x] Pages source set to "GitHub Actions" (2026-11-08); every push to `main` now deploys.
+- [ ] Talk mode on a real phone: check speech recognition in a noisy stall, the Filipino TTS voice, and that the screen stays on.
 - [ ] Test on the actual phone: install over the existing v15 PWA and confirm data migrates, offline works, the update reloads, and the Ask chat survives an app restart.
 - [ ] Optional: Play Store via Capacitor. Swap the adapters in `src/platform/` (files → @capacitor/filesystem + share, haptics → @capacitor/haptics, voice → @capacitor-community/speech-recognition + text-to-speech, because the Android WebView has no SpeechRecognition). Nothing outside `platform/` should need to change.
 - [ ] Optional: bundle size (~495 KB JS, ~163 KB gzip, mostly React + motion) could shrink with `LazyMotion`. It's fine for a precached PWA.

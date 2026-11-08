@@ -5,15 +5,18 @@
 // while the header and composer stay put — including when the keyboard opens.
 
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "../store/appStore";
 import { tableDisplayName } from "../lib/bill";
 import { fmtDayLabel, fmtTime, peso } from "../lib/format";
 import { haptic } from "../platform/haptics";
 import { speak, speechInputSupported, startListening, stopSpeaking, type ListenSession, type VoiceError } from "../platform/voice";
 import { BackButton } from "../ui/components";
-import { IconArrowDown, IconArrowUp, IconCash, IconChart, IconCheck, IconInfo, IconMic, IconReceipt, IconSparkle, IconStop, IconTrash, IconUndo, LogoMark } from "../ui/Icons";
-import { useAgent, type ChatMessage } from "./agentStore";
+import { IconArrowDown, IconArrowUp, IconBulb, IconCash, IconChart, IconCheck, IconChevron, IconInfo, IconMic, IconReceipt, IconSparkle, IconStop, IconTrash, IconUndo, IconWave, IconX, LogoMark } from "../ui/Icons";
+import { useAgent, worldSnapshot, type ChatMessage } from "./agentStore";
+import { insights } from "./engine";
+import { executePlan } from "./executor";
+import { isTaglish } from "./knowledge";
 import type { AgentReply, Card } from "./types";
 
 const VOICE_ERRORS: Record<VoiceError, string> = {
@@ -49,7 +52,7 @@ function useContextTable(): { id: number; name: string } | null {
 
 // ---------- cards ----------
 
-function CardView({ card }: { card: Card }) {
+export function CardView({ card }: { card: Card }) {
   const openTable = useApp((s) => s.openTable);
   if (card.kind === "bill") {
     const hl = new Set(card.highlight ?? []);
@@ -70,6 +73,7 @@ function CardView({ card }: { card: Card }) {
             <div key={`${l.name}|${l.price}`} className={`acard-row${hl.has(l.name) ? " hl" : ""}`}>
               <span className="lbl">
                 {l.qty}× {l.name}
+                {l.note && <small>{l.note}</small>}
               </span>
               <span className="val">{peso(l.price * l.qty)}</span>
             </div>
@@ -200,6 +204,13 @@ function Message({ m, first, last, animate: animateProp, onReply }: MessageProps
           </div>
         )}
         {m.undo === "used" && <div className="mstate">Undone</div>}
+        {m.link && (
+          <div className="mactions">
+            <button className="btn btn-secondary btn-small" onClick={() => executePlan({ kind: "navigate", route: m.link!.route })}>
+              {m.link.label} <IconChevron />
+            </button>
+          </div>
+        )}
         {last && <div className="mtime">{fmtTime(new Date(m.ts).toISOString())}</div>}
       </div>
     </motion.div>
@@ -262,6 +273,7 @@ export function AskScreen() {
   };
   useEffect(autoSize, [text]);
 
+  const lastUserText = useRef("");
   const afterReply = (reply: AgentReply | null, via: "voice" | "text") => {
     if (!reply) return;
     if (reply.tone === "error" || reply.tone === "warn") haptic.warning();
@@ -270,7 +282,7 @@ export function AskScreen() {
     speak(reply.speak ?? reply.text, () => {
       // Hands-free: keep the conversation going while the chat is open.
       if (settings.handsFree && document.querySelector(".chat")) listen();
-    });
+    }, { tagalog: isTaglish(lastUserText.current) });
   };
 
   const submit = (value: string, via: "voice" | "text" = "text") => {
@@ -280,6 +292,7 @@ export function AskScreen() {
     setPartial("");
     setVoiceError(null);
     haptic.tap();
+    lastUserText.current = v;
     afterReply(useAgent.getState().send(v, via), via);
   };
 
@@ -319,6 +332,10 @@ export function AskScreen() {
   };
 
   const t = ctxTable?.name;
+  // A tip worth surfacing right now (long waits, sold out, old utang…), dismissible.
+  const [hiddenTip, setHiddenTip] = useState<string | null>(null);
+  const dataVersion = useApp((s) => s.data);
+  const tip = useMemo(() => insights(worldSnapshot()).find((x) => x.text !== hiddenTip) ?? null, [dataVersion, hiddenTip, messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const last = [...messages].reverse().find((m) => m.role === "agent");
   const suggestions =
     messages.length === 0
@@ -352,11 +369,18 @@ export function AskScreen() {
               </span>
             </div>
           </div>
-          {messages.length > 0 && (
-            <button className="icon-btn" aria-label="Clear chat" onClick={() => useApp.getState().openDialog({ type: "confirm-clear-chat" })}>
-              <IconTrash />
-            </button>
-          )}
+          <div className="topbar-actions">
+            {messages.length > 0 && (
+              <button className="icon-btn" aria-label="Clear chat" onClick={() => useApp.getState().openDialog({ type: "confirm-clear-chat" })}>
+                <IconTrash />
+              </button>
+            )}
+            {canVoice && (
+              <button className="icon-btn accent" aria-label="Start Talk mode" onClick={() => useApp.getState().openTalk()}>
+                <IconWave />
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -378,6 +402,18 @@ export function AskScreen() {
                   </button>
                 ))}
               </div>
+              {canVoice && (
+                <button className="talk-cta" onClick={() => useApp.getState().openTalk()}>
+                  <span className="sico red">
+                    <IconWave />
+                  </span>
+                  <span>
+                    <b>Talk mode</b>
+                    <span>Hands-free conversation — I listen, answer and listen again</span>
+                  </span>
+                  <IconChevron />
+                </button>
+              )}
               <button className="btn btn-ghost btn-small" style={{ marginTop: 14 }} onClick={() => submit("What can you do?")}>
                 <IconInfo /> See everything I can do
               </button>
@@ -418,6 +454,20 @@ export function AskScreen() {
           )}
         </AnimatePresence>
         <div className="chat-foot-inner">
+          {tip && !listening && (
+            <div className="nudge" role="status">
+              <IconBulb />
+              <button
+                className="nudge-text"
+                onClick={() => (tip.tableId !== undefined ? useApp.getState().openTable(tip.tableId) : submit("Any tips?"))}
+              >
+                {tip.text}
+              </button>
+              <button className="nudge-x" aria-label="Dismiss tip" onClick={() => setHiddenTip(tip.text)}>
+                <IconX />
+              </button>
+            </div>
+          )}
           {voiceError && (
             <div className="voice-note">
               <IconInfo /> {voiceError}

@@ -3,7 +3,7 @@
 // old app versions or from files the user picks, so nothing is trusted.
 
 import { DEFAULT_SETTINGS, freshData } from "./defaults";
-import type { AppData, MenuCategory, Settings, Split, TableDef, Txn } from "./types";
+import type { AppData, Expense, MenuCategory, MoneyMethod, OrderItem, PayMethod, Settings, Split, TableDef, Txn, UtangPayment } from "./types";
 
 export const LEGACY_STORAGE_KEY = "order_board_streetfood_v1";
 export const BACKUP_TYPE = "order-board-full-backup";
@@ -13,12 +13,25 @@ type Loose = Record<string, unknown>;
 const isObj = (v: unknown): v is Loose => !!v && typeof v === "object" && !Array.isArray(v);
 const num = (v: unknown, fallback: number) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
 const str = (v: unknown, fallback: string) => (typeof v === "string" ? v : fallback);
+const isoOr = (v: unknown): string | undefined => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? v : undefined);
+const PAY_METHODS: PayMethod[] = ["cash", "gcash", "maya", "utang"];
+const MONEY_METHODS: MoneyMethod[] = ["cash", "gcash", "maya"];
 
-function cleanItems(v: unknown) {
+/** keepServed: open bills track serving; paid records don't. */
+function cleanItems(v: unknown, keepServed = false): OrderItem[] {
   if (!Array.isArray(v)) return [];
-  return v
-    .filter(isObj)
-    .map((i) => ({ name: str(i.name, "Item"), price: num(i.price, 0), qty: Math.max(1, Math.round(num(i.qty, 1))) }));
+  return v.filter(isObj).map((i) => {
+    const qty = Math.max(1, Math.round(num(i.qty, 1)));
+    const note = typeof i.note === "string" ? i.note.trim().slice(0, 60) : "";
+    const served = keepServed && typeof i.served === "number" ? Math.max(0, Math.min(qty, Math.round(i.served))) : 0;
+    return { name: str(i.name, "Item"), price: num(i.price, 0), qty, ...(note ? { note } : {}), ...(served ? { served } : {}) };
+  });
+}
+
+function cleanSplit(sp: Loose): Split {
+  const items = cleanItems(sp.items, true);
+  const openedAt = items.length ? isoOr(sp.openedAt) : undefined;
+  return { items, ...(openedAt ? { openedAt } : {}) };
 }
 
 /**
@@ -33,9 +46,9 @@ export function migrateTables(raw: unknown): Record<string, Split[]> {
     if (!Array.isArray(val) || val.length === 0) {
       out[key] = [];
     } else if (isObj(val[0]) && "items" in val[0]) {
-      out[key] = val.filter(isObj).map((sp) => ({ items: cleanItems(sp.items) }));
+      out[key] = val.filter(isObj).map(cleanSplit);
     } else {
-      out[key] = [{ items: cleanItems(val) }];
+      out[key] = [{ items: cleanItems(val, true) }];
     }
   }
   return out;
@@ -57,6 +70,7 @@ function cleanMenu(v: unknown): MenuCategory[] | null {
           name: str(i.name, "Item"),
           price: num(i.price, 0),
           ...(Array.isArray(i.aliases) ? { aliases: i.aliases.filter((a): a is string => typeof a === "string") } : {}),
+          ...(typeof i.soldOut === "string" && /^\d{4}-\d{2}-\d{2}$/.test(i.soldOut) ? { soldOut: i.soldOut } : {}),
         }))
       : [],
   }));
@@ -80,7 +94,41 @@ function cleanHistory(v: unknown): Txn[] {
       total: num(h.total, items.reduce((s, i) => s + i.price * i.qty, 0)),
       ts: Number.isNaN(Date.parse(ts)) ? new Date().toISOString() : ts,
       ...(typeof h.cash === "number" ? { cash: h.cash } : {}),
+      ...cleanPaymentInfo(h),
     });
+  }
+  return out;
+}
+
+function cleanPaymentInfo(h: Loose): Pick<Txn, "method" | "customer" | "payments"> {
+  const method = PAY_METHODS.includes(h.method as PayMethod) ? (h.method as PayMethod) : undefined;
+  if (!method || method === "cash") return {};
+  if (method !== "utang") return { method };
+  const payments: UtangPayment[] = Array.isArray(h.payments)
+    ? h.payments.filter(isObj).flatMap((p) => {
+        const ts = isoOr(p.ts);
+        const amount = num(p.amount, 0);
+        if (!ts || amount <= 0) return [];
+        return [{ ts, amount, method: MONEY_METHODS.includes(p.method as MoneyMethod) ? (p.method as MoneyMethod) : "cash" }];
+      })
+    : [];
+  const customer = str(h.customer, "").trim().slice(0, 40) || "Customer";
+  return { method, customer, ...(payments.length ? { payments } : {}) };
+}
+
+function cleanExpenses(v: unknown): Expense[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<number>();
+  const out: Expense[] = [];
+  for (const e of v) {
+    if (!isObj(e)) continue;
+    const ts = isoOr(e.ts);
+    const amount = num(e.amount, 0);
+    if (!ts || amount <= 0) continue;
+    let id = num(e.id, Date.parse(ts));
+    while (seen.has(id)) id++;
+    seen.add(id);
+    out.push({ id, ts, amount, what: str(e.what, "Expense").trim().slice(0, 40) || "Expense" });
   }
   return out;
 }
@@ -103,6 +151,9 @@ function cleanSettings(raw: Loose): Settings {
       handsFree: typeof agent.handsFree === "boolean" ? agent.handsFree : DEFAULT_SETTINGS.agent.handsFree,
     },
     acceptedLegalVersion: typeof s.acceptedLegalVersion === "string" ? s.acceptedLegalVersion : null,
+    backupReminder: typeof s.backupReminder === "boolean" ? s.backupReminder : DEFAULT_SETTINGS.backupReminder,
+    lastBackupAt: isoOr(s.lastBackupAt) ?? null,
+    backupSnoozeUntil: isoOr(s.backupSnoozeUntil) ?? null,
   };
 }
 
@@ -129,6 +180,7 @@ export function normalizeAppData(raw: Loose): AppData {
     nextMenuCatId: Math.max(num(raw.nextMenuCatId, 7), maxCat + 1),
     nextMenuItemId: Math.max(num(raw.nextMenuItemId, 16), maxItem + 1),
     settings: cleanSettings(raw),
+    expenses: cleanExpenses(raw.expenses),
     history: cleanHistory(raw.history),
   };
 }

@@ -29,8 +29,8 @@ export function ChangelogScreen() {
 
 const FEATURES = [
   { Icon: IconWifiOff, tone: "green", text: "Works fully offline — no account and no internet needed to take orders." },
-  { Icon: IconCash, tone: "gold", text: "Running bills per table, split bills, cash and change, and daily to monthly sales." },
-  { Icon: IconSparkle, tone: "red", text: "Ask Agent: type or say orders and questions in English or Taglish." },
+  { Icon: IconCash, tone: "gold", text: "Bills per table, split bills, Cash/GCash/Maya, utang, expenses and profit — daily to monthly." },
+  { Icon: IconSparkle, tone: "red", text: "Ask Agent: type, say or talk hands-free in English or Taglish — it knows every part of the app." },
   { Icon: IconShield, tone: "blue", text: "Your data stays on this phone. No ads, analytics or tracking." },
 ] as const;
 

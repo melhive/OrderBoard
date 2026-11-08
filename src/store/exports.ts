@@ -7,8 +7,8 @@ import { useApp } from "./appStore";
 export function exportReport(format: "csv" | "pdf", spec: PeriodSpec) {
   const { data } = useApp.getState();
   const txns = txnsForPeriod(data.history, spec, data.settings);
-  if (!txns.length) return;
-  const input = { spec, txns, hours: data.settings, businessName: data.settings.businessName, tableList: data.tableList };
+  if (!txns.length && !data.expenses.length) return;
+  const input = { spec, txns, hours: data.settings, businessName: data.settings.businessName, tableList: data.tableList, expenses: data.expenses, history: data.history };
   if (format === "csv") {
     const { filename, csv } = buildCSV(input);
     void saveFile(filename, "text/csv;charset=utf-8", csv);
@@ -18,8 +18,9 @@ export function exportReport(format: "csv" | "pdf", spec: PeriodSpec) {
 }
 
 export async function exportAllData() {
-  const { data, showToast } = useApp.getState();
+  const { data, showToast, noteBackup } = useApp.getState();
   const json = JSON.stringify(toBackup(data), null, 2);
   await saveFile(`order_board_backup_${isoDate(new Date())}.json`, "application/json", json);
+  noteBackup();
   showToast({ text: "Backup exported. Keep a copy off this phone.", tone: "success" });
 }

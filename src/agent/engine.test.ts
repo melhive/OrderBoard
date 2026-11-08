@@ -359,3 +359,233 @@ describe("new abilities", () => {
     expect(say("what is our busiest hour").text).toMatch(/busiest hour/);
   });
 });
+
+// ---------------- v18 abilities ----------------
+
+const lastAgent = () => [...useAgent.getState().messages].reverse().find((m) => m.role === "agent")!;
+
+describe("conversation and how-to", () => {
+  it("greets with tonight's status", () => {
+    say("2 pares table 1");
+    const r = say("good evening");
+    expect(r.text).toMatch(/Ready to take orders|Good evening/);
+    expect(r.text).toMatch(/1 table open/);
+  });
+
+  it("replies in Taglish when spoken to in Taglish", () => {
+    expect(say("salamat po").text).toMatch(/Walang anuman/);
+    expect(say("kumusta ka?").text).toMatch(/Ayos lang/);
+    expect(say("pagod na ako").text).toMatch(/Kaya mo/);
+  });
+
+  it("answers how-to questions about every feature with a shortcut", () => {
+    let r = say("how do I add a table?");
+    expect(r.text).toMatch(/Add table/);
+    r = say("paano mag utang?");
+    expect(r.text).toMatch(/Utang/);
+    expect(lastAgent().link?.route).toEqual({ name: "utang" });
+    expect(say("how can i back up my data").text).toMatch(/Export all data/);
+    expect(say("paano mag-backup?").text).toMatch(/Export all data/);
+    expect(say("paano i-print ang report?").text).toMatch(/PDF/);
+    expect(say("where can I change the price?").text).toMatch(/Menu/);
+    expect(say("how do i mark items as served").text).toMatch(/✓/);
+    expect(say("can i pay with gcash?").text).toMatch(/GCash/);
+  });
+
+  it("does not mistake orders or price questions for how-to", () => {
+    expect(say("how much is pares").text).toBe("Pares is ₱60.");
+    say("2 mami for table 2");
+    expect(bill(2)).toEqual(["2x Mami"]);
+  });
+
+  it("help lists the new abilities", () => {
+    const r = say("what can you do?");
+    expect(r.card?.kind).toBe("list");
+    expect(JSON.stringify(r.card)).toMatch(/utang/i);
+  });
+});
+
+describe("corrections", () => {
+  it("moves the last order with 'no, table 4'", () => {
+    say("2 pares table 3");
+    const r = say("no, table 4");
+    expect(bill(3)).toEqual([]);
+    expect(bill(4)).toEqual(["2x Pares"]);
+    expect(r.text).toMatch(/moved 2× Pares from Table 3 to Table 4/);
+  });
+
+  it("swaps the item with 'mami pala' and keeps the quantity", () => {
+    say("2 pares table 1");
+    say("mami pala");
+    expect(bill(1)).toEqual(["2x Mami"]);
+  });
+
+  it("replaces only the matching item of a multi-item order", () => {
+    say("1 pares and 1 water table 1");
+    say("i meant softdrinks");
+    expect(bill(1)).toEqual(["1x Pares", "1x Softdrinks"]);
+  });
+
+  it("changes one item to another on the bill", () => {
+    say("3 siomai table 2");
+    say("change siomai to pastil on table 2");
+    expect(bill(2)).toEqual(["3x Pastil"]);
+  });
+
+  it("asks what to add when only a table is given, then uses it", () => {
+    expect(say("add to table 3").text).toMatch(/What should I add to Table 3/);
+    say("2 pares");
+    expect(bill(3)).toEqual(["2x Pares"]);
+  });
+});
+
+describe("several commands at once", () => {
+  it("adds to different tables in one sentence", () => {
+    const r = say("2 pares for table 1 and 3 siomai for table 2");
+    expect(bill(1)).toEqual(["2x Pares"]);
+    expect(bill(2)).toEqual(["3x Siomai"]);
+    expect(r.card?.kind).toBe("list");
+  });
+
+  it("handles table-first phrasing", () => {
+    say("table 1 isang pares, table 2 dalawang mami");
+    expect(bill(1)).toEqual(["1x Pares"]);
+    expect(bill(2)).toEqual(["2x Mami"]);
+  });
+
+  it("confirms a batch that includes payments, and undo reverts all of it", () => {
+    say("pares table 1");
+    say("mami table 2");
+    const r = say("table 1 paid and table 2 paid");
+    expect(r.confirm).toBeTruthy();
+    confirmLast();
+    expect(app().data.history).toHaveLength(2);
+    say("undo");
+    expect(app().data.history).toHaveLength(0);
+    expect(bill(1)).toEqual(["1x Pares"]);
+  });
+
+  it("does sequences with 'then'", () => {
+    say("2 pares for table 1 then 1 water");
+    expect(bill(1)).toEqual(["2x Pares", "1x Water"]);
+  });
+
+  it("still treats 'move table 2 to table 4' as one command", () => {
+    say("mami table 2");
+    say("move table 2 to table 4");
+    confirmLast();
+    expect(bill(4)).toEqual(["1x Mami"]);
+  });
+});
+
+describe("payment methods and utang", () => {
+  it("records GCash payments", () => {
+    say("2 pares table 1");
+    const r = say("table 1 paid gcash");
+    expect(r.text).toMatch(/via GCash/);
+    confirmLast();
+    expect(app().data.history[0]).toMatchObject({ method: "gcash", total: 120 });
+  });
+
+  it("puts a bill on someone's utang and records payments", () => {
+    say("2 pares table 2");
+    const r = say("table 2 utang ni Ben");
+    expect(r.text).toMatch(/Ben’s utang/);
+    confirmLast();
+    expect(app().data.history[0]).toMatchObject({ method: "utang", customer: "Ben", total: 120 });
+    expect(say("sino may utang?").text).toMatch(/owes you ₱120/);
+    expect(say("magkano utang ni Ben").text).toMatch(/Ben owes ₱120/);
+    say("Ben paid 50");
+    confirmLast();
+    expect(app().data.history[0]!.payments).toEqual([expect.objectContaining({ amount: 50, method: "cash" })]);
+    say("nagbayad si ben lahat gcash");
+    confirmLast();
+    expect(say("who owes us").text).toMatch(/Nobody owes/);
+  });
+
+  it("asks for the name when it's missing", () => {
+    say("mami table 3");
+    expect(say("table 3 utang").text).toMatch(/Whose utang/);
+    say("Aling Nena");
+    confirmLast();
+    expect(app().data.history[0]).toMatchObject({ customer: "Aling Nena" });
+  });
+});
+
+describe("sold out, notes, serving", () => {
+  it("marks items sold out and warns on orders", () => {
+    say("ubos na ang pastil");
+    const item = app().data.menu.flatMap((c) => c.items).find((i) => i.name === "Pastil")!;
+    expect(item.soldOut).toBeTruthy();
+    const r = say("1 pastil table 1");
+    expect(r.text).toMatch(/sold out/);
+    expect(bill(1)).toEqual([]);
+    expect(say("what's sold out?").text).toMatch(/Pastil/);
+    say("pastil available na");
+    expect(app().data.menu.flatMap((c) => c.items).find((i) => i.name === "Pastil")!.soldOut).toBeUndefined();
+  });
+
+  it("does not confuse 'sold' questions with sold out", () => {
+    say("2 pares table 1");
+    say("table 1 paid");
+    confirmLast();
+    expect(say("how many pares sold today").text).toMatch(/2 sold/);
+  });
+
+  it("takes notes with orders and on existing items", () => {
+    say("2 pares walang sibuyas and 1 mami for table 1");
+    expect(app().data.tables["1"]![0]!.items).toEqual([
+      { name: "Pares", price: 60, qty: 2, note: "Walang sibuyas" },
+      { name: "Mami", price: 50, qty: 1 },
+    ]);
+    say("extra sabaw sa mami table 1");
+    expect(app().data.tables["1"]![0]!.items[1]).toMatchObject({ name: "Mami", note: "Extra sabaw" });
+    // "extra rice" is an add-on on the menu, not a note
+    say("extra rice table 2");
+    expect(bill(2)).toEqual(["1x Rice"]);
+  });
+
+  it("marks tables served and lists who is waiting", () => {
+    say("2 pares table 1");
+    say("mami table 2");
+    expect(say("sino hindi pa na-serve?").text).toMatch(/2 tables still waiting/);
+    say("served na table 1");
+    expect(app().data.tables["1"]![0]!.items[0]!.served).toBe(2);
+    expect(say("which tables are waiting").card?.kind).toBe("list");
+  });
+});
+
+describe("expenses, profit and tips", () => {
+  it("records expenses and computes profit", () => {
+    say("2 pares table 1");
+    say("table 1 paid");
+    confirmLast();
+    const r = say("gastos 50 sa yelo");
+    expect(r.text).toMatch(/₱50 for Yelo/);
+    expect(app().data.expenses).toHaveLength(1);
+    expect(say("profit today").text).toMatch(/Profit today: ₱70/);
+    expect(say("magkano gastos ngayon").text).toMatch(/Expenses today: ₱50/);
+    say("undo");
+    expect(app().data.expenses).toHaveLength(0);
+  });
+
+  it("gives tips about long waits", () => {
+    say("2 pares table 1");
+    // Pretend the bill was opened 30 minutes ago.
+    useApp.setState((s) => ({ data: { ...s.data, tables: { ...s.data.tables, "1": [{ ...s.data.tables["1"]![0]!, openedAt: new Date(Date.now() - 30 * 60000).toISOString() }] } } }));
+    const r = say("any tips?");
+    expect(JSON.stringify(r.card)).toMatch(/Table 1 has been waiting 30 min/);
+  });
+});
+
+describe("follow-up questions keep their confirmations", () => {
+  it("asks which table is paying, then the Yes button works", () => {
+    say("2 pares table 1");
+    say("mami table 2");
+    useAgent.getState().reset();
+    expect(say("paid na").text).toMatch(/Which table is paying/);
+    expect(say("table 1").text).toMatch(/Mark Table 1 as paid/);
+    confirmLast();
+    expect(app().data.history).toHaveLength(1);
+  });
+});

@@ -187,7 +187,7 @@ describe("taking and settling an order", () => {
     await wait(450);
     const d = useApp.getState().data;
     expect(d.history.map((h) => h.total)).toEqual([20]);
-    expect(d.tables["3"]).toEqual([{ items: [{ name: "Pares", price: 60, qty: 1 }] }]);
+    expect(d.tables["3"]).toEqual([{ items: [{ name: "Pares", price: 60, qty: 1 }], openedAt: expect.any(String) }]);
     // Still on the order screen because a bill remains.
     expect(useApp.getState().stack.at(-1)).toEqual({ name: "order", tableId: 3 });
   });
@@ -257,7 +257,8 @@ describe("summary", () => {
     click(button("Restore"));
     const d = useApp.getState().data;
     expect(d.history.map((h) => h.id)).toEqual([2]);
-    expect(d.tables["1"]).toEqual([{ items: [{ name: "Pares", price: 60, qty: 2 }] }]);
+    // Restored bills come back as already served, with their original time.
+    expect(d.tables["1"]).toEqual([{ items: [{ name: "Pares", price: 60, qty: 2, served: 2 }], openedAt: expect.any(String) }]);
   });
 
   it("deletes an order only after the confirmation code is typed", () => {
@@ -443,5 +444,171 @@ describe("quick cash", () => {
     expect(quickCashOptions(145)).toEqual([145, 150, 200, 500, 1000]);
     expect(quickCashOptions(500)).toEqual([500, 1000]);
     expect(quickCashOptions(0)).toEqual([]);
+  });
+});
+
+// ---------------- v18 features ----------------
+
+function contextMenu(el: HTMLElement) {
+  act(() => {
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+  });
+}
+
+describe("serving, notes and sold out", () => {
+  beforeEach(() => start());
+
+  it("marks items served and shows what's left to serve on the table card", () => {
+    click(byLabel("Table 1, empty"));
+    click(byLabel(/^Add Pares, ₱60/));
+    click(byLabel(/^Add Mami, ₱50/));
+    click(byLabel("View bill"));
+    expect(text()).toContain("2 not served yet");
+    click(byLabel("Mark Pares served"));
+    expect(useApp.getState().data.tables["1"]![0]!.items[0]!.served).toBe(1);
+    expect(text()).toContain("1 not served yet");
+    click(button(/All served/));
+    expect(text()).not.toContain("not served yet");
+    click(byLabel("Hide bill"));
+    click(byLabel(/^Back to/));
+    expect(byLabel("Table 1, ₱110")).toBeTruthy();
+    expect(text()).toContain("Served");
+  });
+
+  it("adds a note to an item from the bill", () => {
+    click(byLabel("Table 2, empty"));
+    click(byLabel(/^Add Pares, ₱60/));
+    click(byLabel("View bill"));
+    click(byLabel("Note for Pares"));
+    click(button("Walang sibuyas"));
+    submitForm(document.getElementById("note-text")!);
+    expect(useApp.getState().data.tables["2"]![0]!.items[0]).toMatchObject({ name: "Pares", note: "Walang sibuyas" });
+    expect(text()).toContain("Walang sibuyas");
+  });
+
+  it("long-press marks an item sold out; tapping it warns, with Add anyway", () => {
+    click(byLabel("Table 1, empty"));
+    contextMenu(byLabel(/^Add Pastil, ₱50/));
+    expect(byLabel(/^Add Pastil, ₱50, sold out/)).toBeTruthy();
+    click(byLabel(/^Add Pastil, ₱50, sold out/));
+    expect(useApp.getState().data.tables["1"]![0]!.items).toEqual([]);
+    expect(text()).toContain("Pastil is marked sold out");
+    click(button("Add anyway"));
+    expect(useApp.getState().data.tables["1"]![0]!.items).toEqual([{ name: "Pastil", price: 50, qty: 1 }]);
+  });
+
+  it("menu editor toggles sold out", () => {
+    click(byLabel("Settings"));
+    click(button(/^Menu\d/));
+    click(byLabel("Mark Siomai sold out"));
+    expect(useApp.getState().data.menu.flatMap((c) => c.items).find((i) => i.name === "Siomai")!.soldOut).toBeTruthy();
+    click(byLabel(/Siomai is sold out/));
+    expect(useApp.getState().data.menu.flatMap((c) => c.items).find((i) => i.name === "Siomai")!.soldOut).toBeUndefined();
+  });
+});
+
+describe("payment methods, utang and expenses", () => {
+  beforeEach(() => start());
+
+  it("pays with GCash", async () => {
+    click(byLabel("Table 1, empty"));
+    click(byLabel(/^Add Pares, ₱60/));
+    click(byLabel("View bill"));
+    click(button("GCash"));
+    expect(text()).toContain("Check the GCash payment");
+    expect(document.querySelector('[aria-label="Cash received"]')).toBeNull();
+    click(button(/Paid GCash ₱60/));
+    await wait(450);
+    expect(useApp.getState().data.history[0]).toMatchObject({ method: "gcash", total: 60 });
+    expect(text()).toContain("Table 1 paid via GCash ₱60");
+  });
+
+  it("charges a bill to utang, then records a payment from the utang list", async () => {
+    click(byLabel("Table 2, empty"));
+    click(byLabel(/^Add Pares, ₱60/));
+    click(byLabel(/^Add Pares, ₱60/));
+    click(byLabel("View bill"));
+    click(button("Utang"));
+    expect(button(/Utang ₱120/).disabled).toBe(true);
+    type(byLabel("Customer name") as HTMLInputElement, "Kuya Ben");
+    click(button(/Utang ₱120/));
+    await wait(450);
+    expect(useApp.getState().data.history[0]).toMatchObject({ method: "utang", customer: "Kuya Ben", total: 120 });
+
+    click(button("Summary"));
+    expect(text()).toContain("Sold on utang");
+    click(button(/^Utang₱120 unpaid/));
+    expect(text()).toContain("Kuya Ben");
+    click([...document.querySelectorAll<HTMLButtonElement>(".txn-row")].find((b) => b.textContent!.includes("unpaid order"))!);
+    click(button(/Record payment/));
+    type(document.getElementById("up-amount") as HTMLInputElement, "50");
+    submitForm(document.getElementById("up-amount")!);
+    expect(useApp.getState().data.history[0]!.payments).toEqual([expect.objectContaining({ amount: 50, method: "cash" })]);
+    expect(text()).toContain("₱70 left");
+  });
+
+  it("adds an expense and shows profit", () => {
+    useApp.getState().setData((d) => ({ ...d, history: [{ id: 1, table: 1, items: [{ name: "Pares", price: 60, qty: 5 }], total: 300, ts: new Date().toISOString() }] }));
+    click(button("Summary"));
+    click(button(/Add expense/));
+    type(document.getElementById("ex-amount") as HTMLInputElement, "120");
+    click(button("Ice"));
+    submitForm(document.getElementById("ex-amount")!);
+    expect(useApp.getState().data.expenses).toEqual([expect.objectContaining({ amount: 120, what: "Ice" })]);
+    const money = document.querySelector(".money")!.textContent!;
+    expect(money).toContain("−₱120");
+    expect(money).toContain("Profit₱180");
+    click(byLabel("Delete expense Ice"));
+    expect(useApp.getState().data.expenses).toEqual([]);
+    click(button("Undo"));
+    expect(useApp.getState().data.expenses).toHaveLength(1);
+  });
+});
+
+describe("backup reminder", () => {
+  beforeEach(() => start());
+
+  it("nudges when there are old sales and no backup, and Later hides it", () => {
+    act(() => useApp.getState().setData((d) => ({ ...d, history: [{ id: 1, table: 1, items: [{ name: "Pares", price: 60, qty: 1 }], total: 60, ts: new Date(Date.now() - 5 * 86400e3).toISOString() }] })));
+    expect(text()).toContain("Save a backup?");
+    click(button("Later"));
+    expect(text()).not.toContain("Save a backup?");
+    expect(useApp.getState().data.settings.backupSnoozeUntil).toBeTruthy();
+  });
+});
+
+describe("Ask Agent extras", () => {
+  beforeEach(() => start());
+
+  it("how-to answers have a button that opens the screen", () => {
+    click(byLabel("Ask Agent"));
+    type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "how do I back up my data?");
+    click(byLabel("Send"));
+    click(button(/Open Settings/));
+    expect(useApp.getState().stack.at(-1)).toEqual({ name: "settings" });
+  });
+
+  it("shows a heads-up tip for a table that has waited long", () => {
+    act(() =>
+      useApp.getState().setData((d) => ({
+        ...d,
+        tables: { ...d.tables, "3": [{ items: [{ name: "Mami", price: 50, qty: 1 }], openedAt: new Date(Date.now() - 25 * 60000).toISOString() }] },
+      })),
+    );
+    expect(document.querySelector(".tcard.waiting")).toBeTruthy();
+    click(byLabel("Ask Agent"));
+    expect(document.querySelector(".nudge")!.textContent).toContain("Table 3 has been waiting 25 min");
+    click(document.querySelector<HTMLButtonElement>(".nudge-text")!);
+    expect(useApp.getState().stack.at(-1)).toEqual({ name: "order", tableId: 3 });
+  });
+
+  it("opens Talk mode by voice command and explains when voice isn't available", () => {
+    click(byLabel("Ask Agent"));
+    type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "talk mode");
+    click(byLabel("Send"));
+    expect(useApp.getState().stack.map((r) => r.name)).toEqual(["tables", "ask", "talk"]);
+    expect(text()).toContain("Voice isn’t supported in this browser");
+    click(byLabel("End Talk mode"));
+    expect(useApp.getState().stack.at(-1)).toEqual({ name: "ask" });
   });
 });

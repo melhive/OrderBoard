@@ -3,6 +3,8 @@ import { useEffect, useLayoutEffect } from "react";
 import { currentRoute, useApp, type Route } from "./store/appStore";
 import { LEGAL_VERSION } from "./legal/content";
 import { AskScreen } from "./agent/AskScreen";
+import { TalkScreen } from "./agent/TalkScreen";
+import { UtangScreen } from "./screens/UtangScreen";
 import { TablesScreen } from "./screens/TablesScreen";
 import { OrderScreen } from "./screens/OrderScreen";
 import { SummaryScreen } from "./screens/SummaryScreen";
@@ -23,6 +25,8 @@ function Screen({ route }: { route: Route }) {
     case "order": return <OrderScreen tableId={route.tableId} />;
     case "summary": return <SummaryScreen />;
     case "ask": return <AskScreen />;
+    case "talk": return <TalkScreen />;
+    case "utang": return <UtangScreen />;
     case "settings": return <SettingsScreen />;
     case "menu": return <MenuEditorScreen />;
     case "changelog": return <ChangelogScreen />;

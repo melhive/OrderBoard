@@ -45,6 +45,9 @@ export const DEFAULT_SETTINGS: Settings = {
   haptics: true,
   agent: { voiceReplies: true, confirmAdds: false, handsFree: false },
   acceptedLegalVersion: null,
+  backupReminder: true,
+  lastBackupAt: null,
+  backupSnoozeUntil: null,
 };
 
 export function freshData(): AppData {
@@ -56,6 +59,7 @@ export function freshData(): AppData {
     nextMenuCatId: 7,
     nextMenuItemId: 16,
     settings: structuredClone(DEFAULT_SETTINGS),
+    expenses: [],
     history: [],
   };
 }

@@ -15,7 +15,13 @@ export function useTheme() {
   const resolved = pref === "system" ? (systemDark ? "dark" : "light") : pref;
   useEffect(() => {
     document.documentElement.dataset.theme = resolved;
-    const color = resolved === "light" ? "#F4EEE1" : "#17130F";
+    // Remembered for the startup screen in index.html (no flash of the wrong theme).
+    try {
+      localStorage.setItem("ob-theme", resolved);
+    } catch {
+      /* storage blocked: the startup screen just uses dark */
+    }
+    const color = resolved === "light" ? "#f5f3f0" : "#121110";
     document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", color));
   }, [resolved]);
   return resolved;

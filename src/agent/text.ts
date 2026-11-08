@@ -158,6 +158,14 @@ export const TOKEN_SYNONYMS: Record<string, string> = {
   kahapon: "yesterday", ngayon: "today", ngayong: "today",
   ilan: "how", anong: "what", ano: "what", meron: "have", mayroon: "have", lahat: "all",
   para: "for", mesa: "table",
+  // Money, utang, serving, stock
+  gastos: "expense", gasto: "expense", nagastos: "expense", ginastos: "expense", gastusin: "expense",
+  bumili: "bought", binili: "bought", pinamili: "bought",
+  tubo: "profit", ganansya: "profit",
+  ilista: "utang", lista: "utang", listahan: "utang", inutang: "utang", umutang: "utang",
+  paymaya: "maya", gcashed: "gcash",
+  naserve: "served", "na-serve": "served", "nai-serve": "served", naiserve: "served", naihain: "served", nahain: "served", inihain: "served", hain: "served", ihain: "served",
+  ubos: "soldout", naubos: "soldout", soldout: "soldout",
 };
 
 /** Multi-word mishearings and Taglish phrases, applied on the normalized string. */
@@ -170,6 +178,8 @@ export const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/\bnoong isang linggo\b|\bnakaraang linggo\b/g, "last week"],
   [/\bnakaraang buwan\b/g, "last month"],
   [/\bpa-?order\b|\bpaorder\b|\bpa-?add\b/g, "order"],
+  // Taglish verb forms: "mag-backup", "i-print", "nag-order", "mag-utang" → the English word.
+  [/\b(?:mag|nag|pag|i|ipa|maka|naka|pinag)-(?=[a-z]{3,})/g, ""],
   [/\bisa pa\b/g, "one more"],
   // Filipino "at" means "and" between items; keep English "at table 3".
   [/\bat\b(?! (?:table|tbl|mesa|number|\d))/g, "and"],
@@ -178,5 +188,8 @@ export const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/\bpa res\b|\bpar es\b/g, "pares"],
   [/\bma mi\b/g, "mami"],
   [/\btake ?out\b/g, "takeout"],
+  [/\bsold[ -]out\b|\bout of stock\b/g, "soldout"],
+  [/\bg[ -]cash\b/g, "gcash"],
+  [/\bpay maya\b/g, "maya"],
   [/\bdine in\b/g, "dinein"],
 ];
