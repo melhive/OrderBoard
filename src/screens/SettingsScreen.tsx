@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useApp } from "../store/appStore";
 import type { ThemePref } from "../data/types";
 import { APP_VERSION } from "../data/changelog";
@@ -6,8 +7,26 @@ import { computeCutoffMinutes, formatMinutesAsTime } from "../lib/businessDay";
 import { pickTextFile } from "../platform/files";
 import { speechInputSupported, speechOutputSupported } from "../platform/voice";
 import { exportAllData } from "../store/exports";
-import { BackButton, Segmented, Switch, TopBar } from "../ui/components";
-import { IconChevron } from "../ui/Icons";
+import { Segmented, Switch, TopBar } from "../ui/components";
+import {
+  IconBook,
+  IconCheck,
+  IconChevron,
+  IconClock,
+  IconDoc,
+  IconDownload,
+  IconInfo,
+  IconMic,
+  IconPalette,
+  IconRepeat,
+  IconShield,
+  IconStar,
+  IconStore,
+  IconUpload,
+  IconVibrate,
+  IconVolume,
+  LogoMark,
+} from "../ui/Icons";
 
 export async function importBackupFlow() {
   const text = await pickTextFile("application/json,.json");
@@ -22,16 +41,46 @@ export async function importBackupFlow() {
   }
 }
 
-function Link({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button className="set-link" onClick={onClick}>
-      {label} <IconChevron />
+type Tone = "red" | "gold" | "green" | "blue" | "purple" | "gray";
+
+function Row({ icon, tone, title, sub, trail, onClick }: { icon: ReactNode; tone: Tone; title: string; sub?: ReactNode; trail?: ReactNode; onClick?: () => void }) {
+  const body = (
+    <>
+      <span className={`sico ${tone}`}>{icon}</span>
+      <span className="smain">
+        <b>{title}</b>
+        {sub && <span>{sub}</span>}
+      </span>
+      {trail !== undefined ? trail : onClick ? <span className="strail"><IconChevron /></span> : null}
+    </>
+  );
+  return onClick ? (
+    <button className="srow" onClick={onClick}>
+      {body}
     </button>
+  ) : (
+    <div className="srow">{body}</div>
+  );
+}
+
+function Block({ icon, tone, title, sub, children }: { icon: ReactNode; tone: Tone; title: string; sub?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="sblock">
+      <div className="sblock-head">
+        <span className={`sico ${tone}`}>{icon}</span>
+        <span className="smain">
+          <b>{title}</b>
+          {sub && <span>{sub}</span>}
+        </span>
+      </div>
+      {children}
+    </div>
   );
 }
 
 export function SettingsScreen() {
   const settings = useApp((s) => s.data.settings);
+  const menuCount = useApp((s) => s.data.menu.reduce((n, c) => n + c.items.length, 0));
   const { updateSettings, push } = useApp.getState();
   const voiceIn = speechInputSupported();
   const voiceOut = speechOutputSupported();
@@ -39,15 +88,46 @@ export function SettingsScreen() {
   const setAgent = (patch: Partial<typeof agent>) => updateSettings({ agent: { ...agent, ...patch } });
 
   return (
-    <div className="screen no-nav">
-      <TopBar title="Settings">
-        <BackButton label="Tables" />
-      </TopBar>
+    <div className="screen">
+      <TopBar back="Tables" title="Settings" />
       <main className="screen-body">
-        <div className="cat-label">Appearance</div>
-        <div className="card">
-          <div className="set-row">
-            <span className="set-label">Theme</span>
+        <div className="section-title">Business</div>
+        <div className="group">
+          <Block icon={<IconStore />} tone="red" title="Business name" sub="Shown in the app and as the letterhead on reports">
+            <input
+              id="biz-name"
+              className="field"
+              type="text"
+              maxLength={40}
+              placeholder="e.g. Kuya Rommel’s Pares House"
+              aria-label="Business name"
+              value={settings.businessName}
+              onChange={(e) => updateSettings({ businessName: e.target.value.slice(0, 40) })}
+            />
+          </Block>
+          <Block
+            icon={<IconClock />}
+            tone="gold"
+            title="Working hours"
+            sub={<>Sales after midnight count toward the same shift. The day rolls over at {formatMinutesAsTime(computeCutoffMinutes(settings))}.</>}
+          >
+            <div className="time-row">
+              <div>
+                <label className="field-label" htmlFor="work-start">Opens</label>
+                <input id="work-start" className="field" type="time" value={settings.workStart} onChange={(e) => e.target.value && updateSettings({ workStart: e.target.value })} />
+              </div>
+              <div>
+                <label className="field-label" htmlFor="work-end">Closes</label>
+                <input id="work-end" className="field" type="time" value={settings.workEnd} onChange={(e) => e.target.value && updateSettings({ workEnd: e.target.value })} />
+              </div>
+            </div>
+          </Block>
+          <Row icon={<IconBook />} tone="green" title="Menu" sub={`${menuCount} items · prices, categories, nicknames`} onClick={() => push({ name: "menu" })} />
+        </div>
+
+        <div className="section-title">Appearance</div>
+        <div className="group">
+          <Block icon={<IconPalette />} tone="purple" title="Theme">
             <Segmented<ThemePref>
               id="theme"
               value={settings.theme}
@@ -58,110 +138,58 @@ export function SettingsScreen() {
                 { value: "system", label: "Auto" },
               ]}
             />
-          </div>
-          <div className="set-row">
-            <span className="set-label">
-              Vibration
-              <small>Short buzz when adding items and on payment</small>
-            </span>
-            <Switch label="Vibration" on={settings.haptics} onChange={(haptics) => updateSettings({ haptics })} />
-          </div>
-        </div>
-
-        <div className="cat-label">Business</div>
-        <div className="card">
-          <label className="field-label" htmlFor="biz-name">
-            Business name
-          </label>
-          <input
-            id="biz-name"
-            className="field"
-            type="text"
-            maxLength={40}
-            placeholder="e.g. Kuya Rommel’s Pares House"
-            value={settings.businessName}
-            onChange={(e) => updateSettings({ businessName: e.target.value.slice(0, 40) })}
+          </Block>
+          <Row
+            icon={<IconVibrate />}
+            tone="gray"
+            title="Vibration"
+            sub="Short buzz when adding items and paying"
+            trail={<Switch label="Vibration" on={settings.haptics} onChange={(haptics) => updateSettings({ haptics })} />}
           />
-          <div className="hint">Shown above “Order Board” and as the letterhead on your PDF/CSV reports.</div>
         </div>
 
-        <div className="cat-label">Working hours</div>
-        <div className="card">
-          <div className="form">
-            <div className="row">
-              <div>
-                <label className="field-label" htmlFor="work-start">
-                  Open
-                </label>
-                <input id="work-start" className="field" type="time" value={settings.workStart} onChange={(e) => e.target.value && updateSettings({ workStart: e.target.value })} />
-              </div>
-              <div>
-                <label className="field-label" htmlFor="work-end">
-                  Close
-                </label>
-                <input id="work-end" className="field" type="time" value={settings.workEnd} onChange={(e) => e.target.value && updateSettings({ workEnd: e.target.value })} />
-              </div>
-            </div>
-          </div>
-          <div className="hint">
-            Sales are grouped into business days by these hours, so sales after midnight still count toward the same shift. The day rolls over at{" "}
-            <b>{formatMinutesAsTime(computeCutoffMinutes(settings))}</b>.
-          </div>
+        <div className="section-title">Ask Agent</div>
+        <div className="group">
+          <Row
+            icon={<IconCheck />}
+            tone="blue"
+            title="Confirm before adding"
+            sub="Off: items are added right away with Undo. Unclear orders always ask."
+            trail={<Switch label="Confirm before adding" on={agent.confirmAdds} onChange={(confirmAdds) => setAgent({ confirmAdds })} />}
+          />
+          <Row
+            icon={<IconVolume />}
+            tone="blue"
+            title="Spoken replies"
+            sub={voiceOut ? "Read replies aloud after you speak" : "Not supported on this device"}
+            trail={<Switch label="Spoken replies" on={agent.voiceReplies && voiceOut} onChange={(voiceReplies) => setAgent({ voiceReplies })} />}
+          />
+          <Row
+            icon={voiceIn ? <IconRepeat /> : <IconMic />}
+            tone="blue"
+            title="Hands-free"
+            sub={voiceIn ? "Keep listening after each spoken reply" : "Voice input isn’t supported in this browser"}
+            trail={<Switch label="Hands-free" on={agent.handsFree && voiceIn} onChange={(handsFree) => setAgent({ handsFree })} />}
+          />
         </div>
 
-        <div className="cat-label">Menu</div>
-        <div className="card">
-          <Link label="Edit menu" onClick={() => push({ name: "menu" })} />
+        <div className="section-title">Data &amp; backup</div>
+        <div className="group">
+          <Row icon={<IconDownload />} tone="green" title="Export all data" sub="Save a full backup file — keep it off this phone" onClick={() => void exportAllData()} />
+          <Row icon={<IconUpload />} tone="gold" title="Import backup" sub="Replace everything with a backup file" onClick={() => void importBackupFlow()} />
         </div>
 
-        <div className="cat-label">Ask Agent</div>
-        <div className="card">
-          <div className="set-row">
-            <span className="set-label">
-              Ask before adding items
-              <small>Off: items are added right away with an Undo button. Unclear orders always ask.</small>
-            </span>
-            <Switch label="Ask before adding items" on={agent.confirmAdds} onChange={(confirmAdds) => setAgent({ confirmAdds })} />
-          </div>
-          <div className="set-row">
-            <span className="set-label">
-              Spoken replies
-              <small>{voiceOut ? "Read replies aloud after a voice request" : "Not supported on this device"}</small>
-            </span>
-            <Switch label="Spoken replies" on={agent.voiceReplies && voiceOut} onChange={(voiceReplies) => setAgent({ voiceReplies })} />
-          </div>
-          <div className="set-row">
-            <span className="set-label">
-              Hands-free
-              <small>{voiceIn ? "Keep listening after each spoken reply" : "Voice input is not supported in this browser"}</small>
-            </span>
-            <Switch label="Hands-free" on={agent.handsFree && voiceIn} onChange={(handsFree) => setAgent({ handsFree })} />
-          </div>
+        <div className="section-title">About</div>
+        <div className="group">
+          <Row icon={<IconStar />} tone="gold" title="What’s new" sub={`Version ${APP_VERSION}`} onClick={() => push({ name: "changelog" })} />
+          <Row icon={<IconInfo />} tone="gray" title="About Order Board" onClick={() => push({ name: "about" })} />
+          <Row icon={<IconShield />} tone="gray" title="Privacy Policy" onClick={() => push({ name: "legal", doc: "privacy" })} />
+          <Row icon={<IconDoc />} tone="gray" title="Terms of Use" onClick={() => push({ name: "legal", doc: "terms" })} />
         </div>
 
-        <div className="cat-label">Data</div>
-        <div className="card">
-          <div className="btn-row">
-            <button className="btn btn-leaf" onClick={() => void exportAllData()}>
-              Export all data
-            </button>
-            <button className="btn btn-secondary" onClick={() => void importBackupFlow()}>
-              Import backup
-            </button>
-          </div>
-          <div className="hint">Full backup of every table, sale and menu item. Your data lives only on this phone — keep a copy somewhere else.</div>
-        </div>
-
-        <div className="cat-label">About</div>
-        <div className="card">
-          <div className="set-row">
-            <span className="set-label">Version</span>
-            <span className="set-value">{APP_VERSION}</span>
-          </div>
-          <Link label="What’s new" onClick={() => push({ name: "changelog" })} />
-          <Link label="About Order Board" onClick={() => push({ name: "about" })} />
-          <Link label="Privacy Policy" onClick={() => push({ name: "legal", doc: "privacy" })} />
-          <Link label="Terms of Use" onClick={() => push({ name: "legal", doc: "terms" })} />
+        <div className="settings-foot">
+          <LogoMark size={36} />
+          <span>Order Board {APP_VERSION} · Works offline · Data stays on this device</span>
         </div>
       </main>
     </div>

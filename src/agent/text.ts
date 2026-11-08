@@ -144,10 +144,35 @@ export const TOKEN_SYNONYMS: Record<string, string> = {
   eggs: "egg", itlog: "egg", rices: "rice", kanin: "rice",
   sodas: "soda", cokes: "coke", tubig: "water",
   drinks: "drink", beverage: "drink",
+  // Filipino numbers (with and without the -ng linker)
+  isa: "1", isang: "1", dalawa: "2", dalawang: "2", tatlo: "3", tatlong: "3", apat: "4", lima: "5", limang: "5",
+  anim: "6", pito: "7", pitong: "7", walo: "8", walong: "8", siyam: "9", sampu: "10", sampung: "10",
+  // Filipino / Taglish intent words, mapped to the English words the engine understands
+  dagdag: "add", dagdagan: "add", idagdag: "add", lagyan: "add", lagay: "add", ilagay: "add", pakidagdag: "add",
+  tanggalin: "remove", alisin: "remove", tanggal: "remove", alis: "remove", bawasan: "remove", bawas: "remove", ibawas: "remove",
+  kanselahin: "cancel", linisin: "clear",
+  lipat: "move", ilipat: "move",
+  bayad: "paid", nagbayad: "paid", bayaran: "pay", magbabayad: "pay",
+  sukli: "change", panukli: "change",
+  nabenta: "sold", naibenta: "sold", nabili: "sold",
+  kahapon: "yesterday", ngayon: "today", ngayong: "today",
+  ilan: "how", anong: "what", ano: "what", meron: "have", mayroon: "have", lahat: "all",
+  para: "for", mesa: "table",
 };
 
-/** Multi-word mishearings, applied on the normalized string. */
+/** Multi-word mishearings and Taglish phrases, applied on the normalized string. */
 export const PHRASE_SYNONYMS: [RegExp, string][] = [
+  [/\bmagkano\b/g, "how much"],
+  [/\bilan\b/g, "how many"],
+  [/\b(?:ngayong|ngayon na) araw\b|\bngayong gabi\b|\bngayon\b/g, "today"],
+  [/\b(?:ngayong|itong|nitong) linggo\b/g, "this week"],
+  [/\b(?:ngayong|itong|nitong) buwan\b/g, "this month"],
+  [/\bnoong isang linggo\b|\bnakaraang linggo\b/g, "last week"],
+  [/\bnakaraang buwan\b/g, "last month"],
+  [/\bpa-?order\b|\bpaorder\b|\bpa-?add\b/g, "order"],
+  [/\bisa pa\b/g, "one more"],
+  // Filipino "at" means "and" between items; keep English "at table 3".
+  [/\bat\b(?! (?:table|tbl|mesa|number|\d))/g, "and"],
   [/\bshu mai\b|\bsiu mai\b|\bsio mai\b|\bsho mai\b/g, "siomai"],
   [/\bsoft drinks?\b/g, "softdrinks"],
   [/\bpa res\b|\bpar es\b/g, "pares"],

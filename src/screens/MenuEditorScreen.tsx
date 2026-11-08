@@ -3,12 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store/appStore";
 import type { MenuCategory, MenuItem } from "../data/types";
 import { peso } from "../lib/format";
-import { BackButton, TopBar } from "../ui/components";
-import { IconGrip, IconPencil, IconPlus, IconX } from "../ui/Icons";
+import { TopBar } from "../ui/components";
+import { IconGrip, IconPencil, IconPlus, IconTrash } from "../ui/Icons";
 
 /**
  * Local copy of an id order that follows the store, but can be rearranged
- * freely while dragging and committed once on drop.
+ * freely while dragging and is committed once on drop.
  */
 function useLocalOrder(ids: number[]) {
   const key = ids.join(",");
@@ -17,7 +17,7 @@ function useLocalOrder(ids: number[]) {
   useEffect(() => {
     setOrder(ids);
     ref.current = ids;
-  }, [key]);
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (next: number[]) => {
     ref.current = next;
     setOrder(next);
@@ -25,18 +25,20 @@ function useLocalOrder(ids: number[]) {
   return [order, set, ref] as const;
 }
 
+const lift = { scale: 1.02, boxShadow: "0 12px 28px rgba(0,0,0,0.3)", zIndex: 5 };
+
 function ItemRow({ cat, item, onDrop }: { cat: MenuCategory; item: MenuItem; onDrop: () => void }) {
   const controls = useDragControls();
   const { openDialog } = useApp.getState();
   return (
-    <Reorder.Item as="li" value={item.id} dragListener={false} dragControls={controls} className="mitem" onDragEnd={onDrop} whileDrag={{ scale: 1.02, boxShadow: "0 10px 24px rgba(0,0,0,0.25)", zIndex: 5 }}>
+    <Reorder.Item as="li" value={item.id} dragListener={false} dragControls={controls} className="mitem" onDragEnd={onDrop} whileDrag={lift}>
       <button className="drag-handle" aria-label={`Drag to reorder ${item.name}`} onPointerDown={(e) => controls.start(e)}>
         <IconGrip />
       </button>
-      <button className="mitem-main" onClick={() => openDialog({ type: "menu-item-form", catId: cat.id, itemId: item.id })}>
+      <button className="mitem-main" onClick={() => openDialog({ type: "menu-item-form", catId: cat.id, itemId: item.id })} aria-label={`Edit ${item.name}`}>
         <span className="mitem-name">
           {item.name}
-          {item.aliases?.length ? <small>aka {item.aliases.join(", ")}</small> : null}
+          {item.aliases?.length ? <small>Also: {item.aliases.join(", ")}</small> : null}
         </span>
         <span className="mitem-price">{peso(item.price)}</span>
       </button>
@@ -57,17 +59,17 @@ function CategoryCard({ cat, onDrop }: { cat: MenuCategory; onDrop: () => void }
   };
 
   return (
-    <Reorder.Item as="li" value={cat.id} dragListener={false} dragControls={controls} className="mcat" onDragEnd={onDrop} whileDrag={{ scale: 1.02, boxShadow: "0 16px 32px rgba(0,0,0,0.35)", zIndex: 10 }}>
+    <Reorder.Item as="li" value={cat.id} dragListener={false} dragControls={controls} className="mcat" onDragEnd={onDrop} whileDrag={lift}>
       <div className="mcat-head">
         <button className="drag-handle" aria-label={`Drag to reorder ${cat.cat}`} onPointerDown={(e) => controls.start(e)}>
           <IconGrip />
         </button>
         <button className="mcat-title" onClick={() => openDialog({ type: "category-form", catId: cat.id })} aria-label={`Rename ${cat.cat}`}>
-          {cat.cat} <IconPencil />
+          {cat.cat} <span className="mcat-count">{cat.items.length}</span> <IconPencil />
         </button>
         {cat.items.length === 0 && (
-          <button className="mini-x" aria-label={`Delete category ${cat.cat}`} onClick={() => deleteCategory(cat.id)}>
-            <IconX />
+          <button className="icon-btn" aria-label={`Delete category ${cat.cat}`} onClick={() => deleteCategory(cat.id)}>
+            <IconTrash />
           </button>
         )}
       </div>
@@ -97,19 +99,25 @@ export function MenuEditorScreen() {
   };
 
   return (
-    <div className="screen no-nav">
-      <TopBar title="Edit Menu">
-        <BackButton label="Settings" />
-      </TopBar>
+    <div className="screen">
+      <TopBar
+        back="Settings"
+        title="Menu"
+        actions={
+          <button className="icon-btn" aria-label="Add category" onClick={() => openDialog({ type: "category-form", catId: null })}>
+            <IconPlus />
+          </button>
+        }
+      />
       <main className="screen-body">
-        <p className="intro">Tap an item to change its name, price or nicknames. Drag the handle to reorder. Changes apply right away on the order screen.</p>
+        <p className="intro">Tap an item to change its name, price or nicknames. Drag ⋮⋮ to reorder. Changes show on the order screen right away.</p>
         <Reorder.Group as="ul" axis="y" values={order} onReorder={setOrder} className="reorder-list">
           {order.map((id) => {
             const cat = byId.get(id);
             return cat ? <CategoryCard key={id} cat={cat} onDrop={commitCat(id)} /> : null;
           })}
         </Reorder.Group>
-        <button className="btn btn-shell btn-full" style={{ marginTop: 8 }} onClick={() => openDialog({ type: "category-form", catId: null })}>
+        <button className="btn btn-secondary btn-full" onClick={() => openDialog({ type: "category-form", catId: null })}>
           <IconPlus /> Add category
         </button>
       </main>

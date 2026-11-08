@@ -5,6 +5,7 @@ import { tableDisplayName } from "../lib/bill";
 import { businessDayKey, periodLabel } from "../lib/businessDay";
 import { peso } from "../lib/format";
 import { exportReport } from "../store/exports";
+import { useAgent } from "../agent/agentStore";
 import { IconFile, IconPrinter } from "./Icons";
 
 function Modal({ title, children, labelId = "dlg-title" }: { title: string; children: ReactNode; labelId?: string }) {
@@ -23,10 +24,10 @@ function Modal({ title, children, labelId = "dlg-title" }: { title: string; chil
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelId}
-        initial={{ opacity: 0, scale: 0.94, y: 12 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.97, y: 6 }}
-        transition={{ type: "spring", stiffness: 460, damping: 34 }}
+        initial={{ opacity: 0.6, y: 60 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 40 }}
+        transition={{ type: "spring", stiffness: 520, damping: 42 }}
       >
         <h3 id={labelId}>{title}</h3>
         {children}
@@ -120,7 +121,7 @@ function AddTable() {
         <div>
           <label className="field-label" htmlFor="at-name">Name</label>
           <input id="at-name" className="field" autoFocus maxLength={24} placeholder="e.g. 5, Takeout, Grab" value={name} onChange={(e) => setName(e.target.value)} />
-          {dup && <div className="field-hint">There’s already a table with that name.</div>}
+          {dup && <div className="field-hint error">There’s already a table with that name.</div>}
         </div>
         <Actions>
           <Cancel />
@@ -237,19 +238,19 @@ function ExportMenu() {
   return (
     <Modal title={`Export ${periodLabel(spec)} report`}>
       <p>Choose a format.</p>
-      <div className="export-options">
-        <button className="export-option" onClick={() => go("csv")}>
-          <IconFile />
+      <div className="option-list">
+        <button className="option" onClick={() => go("csv")}>
+          <span className="ico"><IconFile /></span>
           <span>
-            <div className="eo-title">CSV spreadsheet</div>
-            <div className="eo-sub">Opens in Google Sheets or Excel</div>
+            <b>CSV spreadsheet</b>
+            <span>Opens in Google Sheets or Excel</span>
           </span>
         </button>
-        <button className="export-option" onClick={() => go("pdf")}>
-          <IconPrinter />
+        <button className="option" onClick={() => go("pdf")}>
+          <span className="ico"><IconPrinter /></span>
           <span>
-            <div className="eo-title">PDF report</div>
-            <div className="eo-sub">Printable letterhead report — choose “Save as PDF”</div>
+            <b>PDF report</b>
+            <span>Printable letterhead report — choose “Save as PDF”</span>
           </span>
         </button>
       </div>
@@ -368,6 +369,26 @@ function ImportError() {
   );
 }
 
+function ConfirmClearChat() {
+  return (
+    <Modal title="Clear the chat?">
+      <p>This deletes your conversation with Ask Agent from this phone. Your orders and sales are not affected.</p>
+      <Actions>
+        <Cancel />
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            useAgent.getState().reset();
+            useApp.getState().closeDialog();
+          }}
+        >
+          Clear chat
+        </button>
+      </Actions>
+    </Modal>
+  );
+}
+
 function renderDialog(d: Dialog) {
   const s = useApp.getState();
   switch (d.type) {
@@ -402,6 +423,7 @@ function renderDialog(d: Dialog) {
     case "menu-item-form": return <MenuItemForm catId={d.catId} itemId={d.itemId} />;
     case "confirm-restore-backup": return <ConfirmRestoreBackup pending={d.pending} />;
     case "import-error": return <ImportError />;
+    case "confirm-clear-chat": return <ConfirmClearChat />;
   }
 }
 

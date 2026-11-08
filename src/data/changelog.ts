@@ -2,6 +2,15 @@
 export const APP_VERSION = `v${__APP_VERSION__.split(".")[0]}`;
 
 export const CHANGELOG: { version: string; changes: string[] }[] = [
+  { version: "v17", changes: [
+    "Fresh new look across the whole app, with a new logo and app icon",
+    "Ask Agent is now a full chat screen: scroll back through earlier messages, jump to the latest, and pick up where you left off — your chat is saved on this phone (clear it any time)",
+    "Ask Agent is smarter: Taglish (“dalawang pares”, “magkano table 1”, “bayad”, “sukli”), move a table's order to another table, work out change before paying, compare days, busiest hour and average order",
+    "Ask from a table and it already knows which table you mean; tap Open on a bill to jump to that table",
+    "Order screen: category shortcuts, a search box and a Custom item button that's always visible, plus a bill bar that slides up when you need it",
+    "Opening tables is smoother — no more flicker",
+    "Settings reorganized into clear groups",
+  ]},
   { version: "v16", changes: [
     "Rebuilt from the ground up with a new professional design, smooth screen transitions and animations",
     "Ask Agent — type or say orders like “2 pares with egg and rice for table 3” and they're logged instantly, fully offline",

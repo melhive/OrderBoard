@@ -8,6 +8,8 @@ import { emptyContext, type AgentContext, type AgentInput, type AgentReply, type
 
 export interface ChatMessage {
   id: number;
+  /** Epoch ms when the message was created. */
+  ts: number;
   role: "user" | "agent";
   text: string;
   card?: Card;
@@ -26,13 +28,17 @@ interface AgentState {
   cancel(id: number): AgentReply | null;
   undo(id: number): void;
   reset(): void;
+  /** Restores saved history (pending buttons from a previous session are retired). */
+  hydrate(messages: ChatMessage[]): void;
 }
 
 let seq = 1;
+const MAX_MESSAGES = 200;
 
 export function worldSnapshot(): World {
   const s = useApp.getState();
-  const r = currentRoute(s);
+  // The chat opens on top of an order screen: that table is still "current".
+  const r = [...s.stack].reverse().find((x) => x.name !== "ask") ?? currentRoute(s);
   return {
     data: s.data,
     currentTableId: r.name === "order" ? r.tableId : null,
@@ -58,6 +64,7 @@ export const useAgent = create<AgentState>()((set, get) => {
     );
     const msg: ChatMessage = {
       id: seq++,
+      ts: Date.now(),
       role: "agent",
       text,
       card: reply.card,
@@ -66,7 +73,7 @@ export const useAgent = create<AgentState>()((set, get) => {
       suggestions: reply.suggestions,
       tone: reply.tone,
     };
-    set({ ctx, messages: [...messages, msg].slice(-80) });
+    set({ ctx, messages: [...messages, msg].slice(-MAX_MESSAGES) });
     return { ...reply, text };
   };
 
@@ -74,7 +81,7 @@ export const useAgent = create<AgentState>()((set, get) => {
     messages: [],
     ctx: emptyContext(),
     send(text, via = "text") {
-      set((s) => ({ messages: [...s.messages, { id: seq++, role: "user", text, via }] }));
+      set((s) => ({ messages: [...s.messages, { id: seq++, ts: Date.now(), role: "user", text, via }] }));
       return run(text);
     },
     confirm(id) {
@@ -94,12 +101,23 @@ export const useAgent = create<AgentState>()((set, get) => {
       set((s) => ({
         messages: [
           ...s.messages.map((x) => (x.id === id ? { ...x, undo: "used" as const } : x)),
-          { id: seq++, role: "agent" as const, text: label ? "Undone. The bill is back to how it was." : "There’s nothing to undo." },
+          { id: seq++, ts: Date.now(), role: "agent" as const, text: label ? "Undone. The bill is back to how it was." : "There’s nothing to undo." },
         ],
       }));
     },
     reset() {
       set({ messages: [], ctx: emptyContext() });
+    },
+    hydrate(saved) {
+      const messages = saved.slice(-MAX_MESSAGES).map((m) => ({
+        ...m,
+        ts: typeof m.ts === "number" ? m.ts : Date.now(),
+        confirm: m.confirm?.state === "pending" ? { ...m.confirm, state: "expired" as const } : m.confirm,
+        undo: undefined,
+        suggestions: undefined,
+      }));
+      seq = Math.max(seq, ...messages.map((m) => m.id + 1));
+      set({ messages, ctx: emptyContext() });
     },
   };
 });

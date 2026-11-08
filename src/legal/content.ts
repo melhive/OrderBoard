@@ -7,7 +7,7 @@
 
 export const PUBLISHER = "Order Board";
 export const CONTACT_EMAIL = "support@example.com"; // TODO: replace with your real support address
-export const LEGAL_VERSION = "2026-11-08";
+export const LEGAL_VERSION = "2026-11-08.2";
 export const LEGAL_EFFECTIVE = "November 8, 2026";
 
 export interface LegalSection {
@@ -28,7 +28,7 @@ export const PRIVACY: LegalSection[] = [
       "Order and billing data: tables, items ordered, prices, split bills, cash received and change.",
       "Sales history: paid orders with their date, time, table and total.",
       "Menu and settings: your items, prices, item nicknames, business name, working hours, theme and assistant preferences.",
-      "Assistant conversation: messages you exchange with Ask Agent are kept in memory only while the app is open and are not saved.",
+      "Assistant conversation: your recent messages with Ask Agent (up to 200) are saved on this device so you can scroll back through them. You can delete them at any time with “Clear chat” in Ask Agent.",
       "This information stays in your browser’s or the app’s private storage on this device. It is not sent to us or anyone else.",
     ],
   },

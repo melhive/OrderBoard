@@ -27,10 +27,11 @@ export type Plan =
   | { kind: "setBusinessName"; name: string }
   | { kind: "setHours"; start: string; end: string }
   | { kind: "export"; format: "csv" | "pdf" | "backup"; spec: PeriodSpec }
+  | { kind: "moveTable"; from: number; to: number }
   | { kind: "undo" };
 
 export type Card =
-  | { kind: "bill"; title: string; lines: Line[]; total: number; highlight?: string[]; note?: string }
+  | { kind: "bill"; title: string; lines: Line[]; total: number; highlight?: string[]; note?: string; tableId?: number }
   | { kind: "stats"; title: string; stats: { label: string; value: string }[]; rows?: { label: string; value: string }[] }
   | { kind: "list"; title: string; rows: { label: string; value?: string; sub?: string }[] };
 

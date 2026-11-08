@@ -99,3 +99,20 @@ export async function requestPersistentStorage(): Promise<boolean> {
     return false;
   }
 }
+
+// ---------- Ask Agent chat history (kept on this device only) ----------
+
+const CHAT_KEY = "chat";
+
+export async function loadChat<T>(): Promise<T[]> {
+  try {
+    const row = await db.kv.get(CHAT_KEY);
+    return Array.isArray(row?.value) ? (row!.value as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveChat(messages: unknown[]): Promise<void> {
+  await db.kv.put({ key: CHAT_KEY, value: messages });
+}
