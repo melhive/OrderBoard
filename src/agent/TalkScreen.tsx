@@ -3,6 +3,8 @@
 // Loop: (greet) → listen → understand → speak the answer → listen again.
 // Tap the orb to interrupt or to start listening; say "yes"/"oo" to confirm.
 // Everything said here is also kept in the chat history.
+// Captions: what you say appears live as you talk, and the assistant's reply
+// lights up word by word as it's read aloud.
 
 import { AnimatePresence, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +19,29 @@ import { isTaglish } from "./knowledge";
 import type { AgentReply, Card } from "./types";
 
 type Phase = "starting" | "listening" | "thinking" | "speaking" | "paused" | "error";
+type Line = { id: number; who: "you" | "agent"; text: string };
+const MAX_LINES = 8;
+
+/** The reply with the words already spoken lit up, the rest dimmed (no layout shift). */
+function SpokenText({ text, fraction }: { text: string; fraction: number }) {
+  const parts = text.split(/(\s+)/);
+  const words = parts.filter((p) => p.trim()).length;
+  const lit = fraction >= 1 ? words : Math.round(fraction * words);
+  let n = 0;
+  return (
+    <>
+      {parts.map((p, i) => {
+        if (!p.trim()) return p;
+        n++;
+        return (
+          <span key={i} className={n <= lit ? "tw said" : "tw"}>
+            {p}
+          </span>
+        );
+      })}
+    </>
+  );
+}
 
 const ERRORS: Record<VoiceError, string> = {
   "not-allowed": "Microphone permission is off. Allow it in your browser or app settings.",
@@ -42,7 +67,14 @@ export function TalkScreen() {
     setPhaseState(p);
   };
   const [heard, setHeard] = useState("");
-  const [answer, setAnswer] = useState("");
+  const [lines, setLines] = useState<Line[]>([]);
+  const [spokenFraction, setSpokenFraction] = useState(1);
+  const nextLine = useRef(1);
+  const captionsRef = useRef<HTMLDivElement>(null);
+  const addLine = (who: Line["who"], text: string) => {
+    const id = nextLine.current++;
+    setLines((ls) => [...ls, { id, who, text }].slice(-MAX_LINES));
+  };
   const [card, setCard] = useState<Card | undefined>();
   const [pendingId, setPendingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,19 +130,21 @@ export function TalkScreen() {
     (text: string, then: "listen" | "pause" = "listen") => {
       if (!alive.current) return;
       setPhase("speaking");
+      setSpokenFraction(0);
       const next = () => {
         if (!alive.current) return;
+        setSpokenFraction(1);
         if (then === "listen" && canListen) listen();
         else setPhase("paused");
       };
-      if (canSpeak) speak(text, next, { tagalog: tagalog.current });
+      if (canSpeak) speak(text, next, { tagalog: tagalog.current, onProgress: (f) => alive.current && setSpokenFraction(f) });
       else setTimeout(next, 900);
     },
     [canListen, canSpeak, listen],
   );
 
   const show = (r: AgentReply) => {
-    setAnswer(r.text);
+    addLine("agent", r.text);
     setCard(r.card);
     const last = [...useAgent.getState().messages].reverse().find((m) => m.role === "agent");
     setPendingId(last?.confirm?.state === "pending" ? last.id : null);
@@ -119,7 +153,8 @@ export function TalkScreen() {
 
   const handle = (text: string) => {
     if (!alive.current) return;
-    setHeard(text);
+    addLine("you", text);
+    setHeard("");
     setPhase("thinking");
     tagalog.current = isTaglish(text);
     const before = useApp.getState().stack.length;
@@ -153,7 +188,7 @@ export function TalkScreen() {
     const tip = insights(world)[0];
     const hello = tagalog.current ? "Nakikinig ako." : "I’m listening.";
     const greeting = `${statusLine(world, tagalog.current)}${tip ? ` ${tip.text}` : ""} ${hello}`;
-    setAnswer(greeting);
+    setLines([{ id: nextLine.current++, who: "agent", text: greeting }]);
     if (!canListen) {
       setError(ERRORS.unsupported);
       setPhase("error");
@@ -168,6 +203,12 @@ export function TalkScreen() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep the newest caption in view.
+  useEffect(() => {
+    const el = captionsRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [lines, heard, card, pendingId, error]);
 
   const tapOrb = () => {
     haptic.tap();
@@ -213,17 +254,21 @@ export function TalkScreen() {
       </header>
 
       <main className="talk-body">
-        <div className="talk-captions" aria-live="polite">
-          <AnimatePresence mode="popLayout">
-            {heard && (
-              <motion.p key={`h-${heard.length > 0}`} className="talk-heard" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                “{heard}”
-              </motion.p>
-            )}
-          </AnimatePresence>
-          <motion.p key={answer} className="talk-answer" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-            {answer}
-          </motion.p>
+        <div className="talk-captions" ref={captionsRef} aria-live="polite">
+          {lines.map((l, i) => {
+            const latest = i === lines.length - 1;
+            return (
+              <p key={l.id} className={`tcap tcap-${l.who}${latest ? " latest" : ""}`}>
+                {l.who === "agent" && latest && phase === "speaking" ? <SpokenText text={l.text} fraction={spokenFraction} /> : l.text}
+              </p>
+            );
+          })}
+          {phase === "listening" && (
+            <p className={`tcap tcap-you live${heard ? "" : " waiting"}`}>
+              {heard}
+              <span className="caret" aria-hidden />
+            </p>
+          )}
           {card && (
             <div className="talk-card">
               <CardView card={card} />

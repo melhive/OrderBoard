@@ -575,8 +575,12 @@ button.srow:active { background: var(--surface-2); }
 @keyframes ripple { from { transform: scale(1); opacity: 0.4; } to { transform: scale(1.7); opacity: 0; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes swap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.listening .ltext { flex: 1; min-width: 0; font-size: 15px; color: var(--text); }
+/* Live caption of what you're saying. Up to 3 lines; when it's longer the
+   newest words stay visible and the oldest fade out at the top. */
+.listening .ltext { flex: 1; min-width: 0; font-size: 15px; line-height: 1.35; color: var(--text); max-height: calc(1.35em * 3); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; overflow-wrap: anywhere; }
+.listening .ltext.long { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em); mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em); }
 .listening .ltext.placeholder { color: var(--text-3); }
+.listening .ltext .caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; border-radius: 1px; background: var(--primary); animation: caret 1s steps(1) infinite; }
 .voice-note { margin: 0 14px 8px; font-size: 12.5px; color: var(--gold); display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
 .voice-note svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
 .jump { position: absolute; left: 50%; transform: translateX(-50%); z-index: 3; width: 40px; height: 40px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-2); display: flex; align-items: center; justify-content: center; color: var(--text); }
@@ -684,9 +688,25 @@ button.srow:active { background: var(--surface-2); }
 .talk-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
 .talk-title svg { border-radius: 6px; }
 .talk-body { flex: 1; min-height: 0; display: flex; flex-direction: column; max-width: 560px; width: 100%; margin: 0 auto; padding: 0 20px calc(20px + var(--safe-bottom)); }
-.talk-captions { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; padding: 8px 0 16px; }
-.talk-heard { margin: 0; font-size: 16px; color: var(--text-2); font-style: italic; text-align: right; }
-.talk-answer { margin: 0; font-size: 22px; line-height: 1.4; font-weight: 600; letter-spacing: -0.01em; }
+/* Live captions: the conversation scrolls up like call captions. The first
+   child's auto margin keeps short conversations at the bottom while still
+   letting long ones scroll (justify-content: flex-end would block that). */
+.talk-captions { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 8px 0 16px; overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px); mask-image: linear-gradient(to bottom, transparent 0, #000 40px); }
+.talk-captions > :first-child { margin-top: auto; }
+.tcap { margin: 0; line-height: 1.4; overflow-wrap: anywhere; transition: opacity 0.3s ease, color 0.3s ease; animation: swap-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tcap-agent { font-size: 17px; font-weight: 600; color: var(--text); opacity: 0.45; }
+.tcap-agent.latest { font-size: 22px; letter-spacing: -0.01em; opacity: 1; }
+.tcap-you { align-self: flex-end; max-width: 85%; text-align: right; font-size: 16px; color: var(--text-2); opacity: 0.55; padding: 8px 14px; border-radius: 18px 18px 4px 18px; background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.tcap-you.latest, .tcap-you.live { opacity: 1; }
+/* The finished sentence replaces the live caption in place: no second slide-in. */
+.tcap-you:not(.live) { animation: none; }
+.tcap-you.live { color: var(--text); font-size: 18px; border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent); }
+.tcap-you.live.waiting { min-width: 56px; text-align: center; }
+.tcap .caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 3px; vertical-align: -0.15em; border-radius: 1px; background: var(--primary); animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.tcap .tw { opacity: 0.32; transition: opacity 0.18s ease; }
+.tcap .tw.said { opacity: 1; }
 .talk-card .acard { margin-top: 0; }
 .talk-confirm { display: flex; gap: 10px; }
 .talk-confirm .btn { flex: 1; }

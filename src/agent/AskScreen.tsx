@@ -491,7 +491,12 @@ export function AskScreen() {
                 <i />
                 <i />
               </span>
-              <span className={`ltext${partial ? "" : " placeholder"}`}>{partial || "Listening… say an order"}</span>
+              <span className={`ltext${partial ? "" : " placeholder"}${partial.length > 90 ? " long" : ""}`} aria-live="polite">
+                <span>
+                  {partial || "Listening… say an order"}
+                  {partial && <span className="caret" aria-hidden />}
+                </span>
+              </span>
               <button className="cbtn live" aria-label="Stop listening" onClick={listen}>
                 <span className="ring" aria-hidden />
                 <IconStop />

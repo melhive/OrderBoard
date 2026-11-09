@@ -3,18 +3,30 @@
 // PWA: uses the Web Speech API (Chrome on Android; recognition needs an
 // internet connection there because Chrome sends audio to Google's speech
 // service).
-// Android app: the WebView has no Web Speech API, so this uses Android's own
-// recognizer (@capacitor-community/speech-recognition; works offline when the
-// phone has Google's offline speech pack) and the phone's text-to-speech
-// engine (@capacitor-community/text-to-speech). Nothing outside this file
-// needs to know which.
+// Android app: the WebView has no Web Speech API, so this uses the app's own
+// "Speech" plugin (android/…/SpeechPlugin.java: Android's recognizer, with
+// live partial words; works offline when the phone has Google's offline
+// speech pack) and the phone's text-to-speech engine
+// (@capacitor-community/text-to-speech). Nothing outside this file needs to
+// know which.
 
+import { registerPlugin, type PermissionState, type PluginListenerHandle } from "@capacitor/core";
 import { isNative, lazy } from "./native";
 
-// Wrapped in an object: a Capacitor plugin is a proxy that answers every
-// property, including "then", so it must never be a promise's result.
-const recognizerPlugin = lazy(() => import("@capacitor-community/speech-recognition").then((m) => ({ SR: m.SpeechRecognition })));
 const ttsPlugin = lazy(() => import("@capacitor-community/text-to-speech"));
+
+type SpeechEvent = { id: number; text?: string; error?: string };
+interface SpeechPluginApi {
+  available(): Promise<{ available: boolean }>;
+  checkPermissions(): Promise<{ microphone: PermissionState }>;
+  requestPermissions(): Promise<{ microphone: PermissionState }>;
+  start(o: { language: string; preferOffline?: boolean }): Promise<{ id: number }>;
+  stop(): Promise<void>;
+  abort(): Promise<void>;
+  addListener(event: "partial" | "final" | "error" | "end", cb: (d: SpeechEvent) => void): Promise<PluginListenerHandle>;
+}
+/** The app-local Android plugin (never awaited or returned from a promise: it's a proxy). */
+const Speech = registerPlugin<SpeechPluginApi>("Speech");
 
 type SR = {
   lang: string;
@@ -108,55 +120,103 @@ export function startListening(h: ListenHandlers, langIndex = 0): ListenSession 
   return { stop: () => rec.stop(), abort: () => rec.abort() };
 }
 
-/** Android's recognizer: one utterance, final text only (no live preview). */
-function startListeningNative(h: ListenHandlers): ListenSession {
+/** The session that native speech events are delivered to (one at a time). */
+let nativeActive: ((event: "partial" | "final" | "error" | "end", d: SpeechEvent) => void) | null = null;
+const nativeEvents = lazy(async () => {
+  for (const ev of ["partial", "final", "error", "end"] as const) await Speech.addListener(ev, (d) => nativeActive?.(ev, d));
+  return true;
+});
+
+/**
+ * Android's recognizer with live captions: onPartial gets the words so far
+ * while the person talks, onFinal the finished sentence. If it stops on an
+ * error after hearing something (some phones do when you tap stop), the last
+ * words heard are used as the sentence.
+ */
+function startListeningNative(h: ListenHandlers, language = "en-PH"): ListenSession {
   let finished = false;
   let cancelled = false;
-  const finish = (text?: string, err?: VoiceError) => {
+  let sessionId: number | undefined;
+  let heard = "";
+  let finalText = "";
+  let err: VoiceError | undefined;
+  let safety: ReturnType<typeof setTimeout> | undefined;
+  const finish = () => {
     if (finished) return;
     finished = true;
+    if (safety) clearTimeout(safety);
+    if (nativeActive === onEvent) nativeActive = null;
     if (!cancelled) {
-      if (err) h.onError?.(err);
-      else if (text) h.onFinal(text);
+      const text = (finalText || heard).trim();
+      if (text) h.onFinal(text);
+      else h.onError?.(err ?? "no-speech");
     }
     h.onEnd?.();
   };
+  const onEvent = (event: "partial" | "final" | "error" | "end", d: SpeechEvent) => {
+    if (finished || (sessionId !== undefined && d.id !== sessionId)) return;
+    if (event === "partial" && d.text) {
+      heard = d.text;
+      h.onPartial?.(d.text);
+    } else if (event === "final") finalText = d.text ?? "";
+    else if (event === "error") {
+      // en-PH missing on this phone (often offline): try English (US) once.
+      if (d.error === "language" && language !== "en-US" && !heard) {
+        nativeActive = null;
+        finished = true;
+        const next = startListeningNative(h, "en-US");
+        replace = next;
+        return;
+      }
+      err = nativeVoiceError(d.error ?? "other");
+    } else if (event === "end") finish();
+  };
+  let replace: ListenSession | null = null;
   void (async () => {
     try {
-      const { SR } = await recognizerPlugin();
-      if (!(await SR.available()).available) return finish(undefined, "unsupported");
-      let perm = await SR.checkPermissions();
-      if (perm.speechRecognition !== "granted") perm = await SR.requestPermissions();
-      if (perm.speechRecognition !== "granted") return finish(undefined, "not-allowed");
-      if (cancelled) return finish();
-      // Google's offline packs are per language; English (US) is the one most
-      // phones have, so use it when there's no connection.
-      const language = navigator.onLine === false ? "en-US" : "en-PH";
-      const r = await SR.start({ language, maxResults: 1, partialResults: false, popup: false });
-      const text = r?.matches?.[0]?.trim();
-      finish(text || undefined, text ? undefined : "no-speech");
+      await nativeEvents();
+      if (!(await Speech.available()).available) {
+        err = "unsupported";
+        return finish();
+      }
+      let perm = await Speech.checkPermissions();
+      if (perm.microphone !== "granted") perm = await Speech.requestPermissions();
+      if (perm.microphone !== "granted") {
+        err = "not-allowed";
+        return finish();
+      }
+      if (cancelled || finished) return finish();
+      nativeActive = onEvent;
+      const r = await Speech.start({ language, preferOffline: navigator.onLine === false });
+      sessionId = r.id;
     } catch (e) {
-      finish(undefined, nativeVoiceError(String((e as Error)?.message ?? e)));
+      err = nativeVoiceError(String((e as Error)?.message ?? e));
+      finish();
     }
   })();
-  const stop = () => void recognizerPlugin().then(({ SR }) => SR.stop()).catch(() => {});
   return {
-    stop,
+    stop: () => {
+      if (replace) return replace.stop();
+      void Speech.stop().catch(() => {});
+      // Never hang if the recognizer doesn't report back.
+      if (!safety) safety = setTimeout(finish, 4000);
+    },
     abort: () => {
+      if (replace) return replace.abort();
       cancelled = true;
-      stop();
+      void Speech.abort().catch(() => {});
       finish();
     },
   };
 }
 
-/** Maps the plugin's error messages (see its SpeechRecognition.java) to ours. */
+/** Maps the Speech plugin's error names (see SpeechPlugin.java) to ours. */
 export function nativeVoiceError(message: string): VoiceError {
   const m = message.toLowerCase();
-  if (m.includes("permission")) return "not-allowed";
-  if (m.includes("no speech") || m.includes("no match") || m.includes("didn't understand")) return "no-speech";
+  if (m.includes("not-allowed") || m.includes("permission")) return "not-allowed";
+  if (m.includes("no-speech") || m.includes("no match")) return "no-speech";
   if (m.includes("network") || m.includes("server")) return "network";
-  if (m.includes("not available")) return "unsupported";
+  if (m.includes("unsupported") || m.includes("not available")) return "unsupported";
   return "other";
 }
 
@@ -192,18 +252,64 @@ export function forSpeech(text: string): string {
     .replace(/—/g, ", ");
 }
 
-export function speak(text: string, onEnd?: () => void, opts: { tagalog?: boolean } = {}) {
+export interface SpeakOptions {
+  tagalog?: boolean;
+  /** How far through the reply the voice is, 0–1 (for live captions). */
+  onProgress?: (fraction: number) => void;
+}
+
+/** Roughly how fast the phone voices talk at our rate, for the caption estimate. */
+const CHARS_PER_SEC = 15;
+
+/**
+ * Reports speaking progress: the engine's own word events when it sends them,
+ * otherwise an estimate from elapsed time (never past 95% until it's done).
+ */
+function progressTracker(said: string, onProgress?: (f: number) => void) {
+  const len = Math.max(1, said.length);
+  let last = 0;
+  let real = false;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const emit = (f: number) => {
+    const v = Math.min(1, f);
+    if (v <= last) return;
+    last = v;
+    onProgress?.(v);
+  };
+  return {
+    start() {
+      if (!onProgress || timer) return;
+      const t0 = Date.now();
+      timer = setInterval(() => {
+        if (!real) emit(Math.min(0.95, (((Date.now() - t0) / 1000) * CHARS_PER_SEC) / len));
+      }, 120);
+    },
+    word(endChar: number) {
+      real = true;
+      emit(endChar / len);
+    },
+    done() {
+      if (timer) clearInterval(timer);
+      emit(1);
+    },
+  };
+}
+
+export function speak(text: string, onEnd?: () => void, opts: SpeakOptions = {}) {
   if (isNative()) return speakNative(text, onEnd, opts);
   if (!speechOutputSupported()) {
+    opts.onProgress?.(1);
     onEnd?.();
     return;
   }
+  const said = forSpeech(text);
   const synth = window.speechSynthesis;
   let u: SpeechSynthesisUtterance;
   try {
     synth.cancel();
-    u = new SpeechSynthesisUtterance(forSpeech(text));
+    u = new SpeechSynthesisUtterance(said);
   } catch {
+    opts.onProgress?.(1);
     onEnd?.();
     return;
   }
@@ -211,12 +317,16 @@ export function speak(text: string, onEnd?: () => void, opts: { tagalog?: boolea
   if (v) u.voice = v;
   u.lang = v?.lang ?? "en-US";
   u.rate = 1.05;
+  const progress = progressTracker(said, opts.onProgress);
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
+    progress.done();
     onEnd?.();
   };
+  u.onstart = () => progress.start();
+  u.onboundary = (e) => progress.word(e.charIndex + (e.charLength || 0));
   u.onend = finish;
   u.onerror = finish;
   try {
@@ -227,7 +337,7 @@ export function speak(text: string, onEnd?: () => void, opts: { tagalog?: boolea
     return;
   }
   // Some Android voices never fire onend; don't let the conversation stall.
-  setTimeout(finish, 2500 + forSpeech(text).length * 90);
+  setTimeout(finish, 2500 + said.length * 90);
 }
 
 export function stopSpeaking() {
@@ -251,18 +361,34 @@ function nativeLangSupported(lang: string): Promise<boolean> {
   return p;
 }
 
-function speakNative(text: string, onEnd: (() => void) | undefined, opts: { tagalog?: boolean }) {
+/** Word-progress events from the TTS plugin go to whichever reply is speaking. */
+let nativeRange: ((endChar: number) => void) | null = null;
+const nativeRangeEvents = lazy(async () => {
+  const { TextToSpeech } = await ttsPlugin();
+  await TextToSpeech.addListener("onRangeStart", (info) => nativeRange?.(info.end));
+  return true;
+});
+
+function speakNative(text: string, onEnd: (() => void) | undefined, opts: SpeakOptions) {
   const said = forSpeech(text);
+  const progress = progressTracker(said, opts.onProgress);
   let done = false;
   const finish = () => {
     if (done) return;
     done = true;
+    if (nativeRange === onRange) nativeRange = null;
+    progress.done();
     onEnd?.();
   };
+  const onRange = (end: number) => progress.word(end);
   void (async () => {
     try {
       const { TextToSpeech, QueueStrategy } = await ttsPlugin();
       const lang = opts.tagalog && (await nativeLangSupported("fil-PH")) ? "fil-PH" : (await nativeLangSupported("en-PH")) ? "en-PH" : "en-US";
+      if (opts.onProgress) await nativeRangeEvents().catch(() => false);
+      if (done) return;
+      nativeRange = onRange;
+      progress.start();
       await TextToSpeech.speak({ text: said, lang, rate: 1.0, queueStrategy: QueueStrategy.Flush });
     } catch {
       /* no TTS engine, or stopped */

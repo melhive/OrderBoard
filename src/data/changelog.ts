@@ -7,6 +7,7 @@ export const CHANGELOG: { version: string; changes: string[] }[] = [
     "In the Android app, voice uses the phone’s own speech recognition — it can work without internet if the phone has Google’s offline speech pack — and replies are read aloud by the phone’s voice",
     "Android app: backups and CSV reports are saved in Documents/Order Board and can be shared; PDF reports open Android’s print screen (choose “Save as PDF”)",
     "Ask Agent takes orders in Bisaya too: “isa ka pares with egg og duha ka mami”, “usa ka pastil ug softdrinks sa table 3”, “dugangi og usa ka mami” (replies stay in English/Taglish)",
+    "Live captions: what you say appears as you talk (in the chat box and in Talk mode), and in Talk mode the assistant’s reply lights up word by word as it’s read aloud",
     "Smoother voice animations in Ask and Talk mode — no more tilted mic, flashing spinner or jumpy rings",
     "Moving from the web version: use Settings → Export all data there, then use Import backup in the app",
   ]},
