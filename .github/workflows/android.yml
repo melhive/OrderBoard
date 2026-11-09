@@ -2,6 +2,8 @@ name: Android APK
 
 # Builds the Capacitor Android app. No Android Studio needed: GitHub's
 # runners have Java and the Android SDK.
+# The runner image ships the Android SDK (ANDROID_HOME, licenses accepted);
+# Gradle downloads any missing platform itself.
 # - Every push/PR: builds the APK and attaches it to the run (Actions → run → Artifacts).
 # - Push to main: also publishes it as a GitHub Release "vX.Y.Z", so the phone
 #   can download it from the repo's Releases page.
@@ -36,7 +38,6 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
 
       - run: pnpm install --frozen-lockfile
