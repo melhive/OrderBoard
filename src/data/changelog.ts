@@ -2,6 +2,12 @@
 export const APP_VERSION = `v${__APP_VERSION__.split(".")[0]}`;
 
 export const CHANGELOG: { version: string; changes: string[] }[] = [
+  { version: "v19", changes: [
+    "Order Board is now also a real Android app (APK): everything is built in, so it works offline from the first open",
+    "In the Android app, voice uses the phone’s own speech recognition — it can work without internet if the phone has Google’s offline speech pack — and replies are read aloud by the phone’s voice",
+    "Android app: backups and CSV reports are saved in Documents/Order Board and can be shared; PDF reports open Android’s print screen (choose “Save as PDF”)",
+    "Moving from the web version: use Settings → Export all data there, then use Import backup in the app",
+  ]},
   { version: "v18", changes: [
     "Talk mode — a hands-free voice conversation with Ask Agent: it listens, answers out loud and listens again; say “yes” or “oo” to confirm",
     "Ask Agent knows the whole app: ask “paano mag-backup?” or “how do I split a bill?” and get the answer with a button that takes you there",

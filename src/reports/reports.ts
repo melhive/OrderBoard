@@ -1,3 +1,4 @@
+import { printPage } from "../platform/files";
 import type { Expense, TableDef, Txn } from "../data/types";
 import { METHOD_LABEL, methodOf, moneyBreakdown, expensesForPeriod } from "../lib/money";
 import {
@@ -170,5 +171,5 @@ export function printReport(html: string) {
     document.body.appendChild(el);
   }
   el.innerHTML = html;
-  window.print();
+  void printPage();
 }

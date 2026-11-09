@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Order Board dark shell colour (same as the PWA's theme_color). -->
+    <color name="colorPrimary">#121110</color>
+    <color name="colorPrimaryDark">#121110</color>
+    <color name="colorAccent">#D9443A</color>
+    <color name="shell">#121110</color>
+</resources>

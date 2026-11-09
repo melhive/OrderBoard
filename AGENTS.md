@@ -4,7 +4,7 @@ Read this first. It tells you what this app is, how it is built, and the rules t
 
 ## What this app is
 
-**Order Board** is an offline order-taking and sales-tracking app for a small Filipino street-food stall that sells pares, mami, pastil and siomai. One person runs it on an Android phone, installed as a PWA from Chrome, while serving customers, often late at night and without a reliable internet connection.
+**Order Board** is an offline order-taking and sales-tracking app for a small Filipino street-food stall that sells pares, mami, pastil and siomai. One person runs it on an Android phone, as a PWA installed from Chrome or (since v19) as a Capacitor Android app (APK), while serving customers, often late at night and without a reliable internet connection.
 
 Core jobs, in order of importance:
 
@@ -24,11 +24,12 @@ Currency is PHP (₱), shown as whole pesos via `peso()`.
 - **v16** (this codebase, merged to `main`): React + TypeScript rebuild. Same features, a new design, IndexedDB storage, Ask Agent, voice, Android back button, legal screens.
 - **v17**: UI redesign (new logo/icons, grouped settings, order screen with sticky categories and a cart bar), Ask Agent as a full chat screen with saved history, and more agent abilities (Taglish, move table, change calculation, comparisons).
 - **v18**: utang (credit), Cash/GCash/Maya, expenses and profit, sold out, item notes, served marks and wait timers, backup reminder; Ask Agent knows the whole app (how-to), chats in Taglish, fixes mistakes, handles several commands at once and gives tips; Talk mode (hands-free voice); inline startup screen.
+- **v19**: the same web app also ships as a **Capacitor Android app** (`android/`), built and signed by GitHub Actions. The PWA keeps working unchanged.
 - The version shown in the app is the **major** of `package.json` `version` (`18.0.0` → "v18"). When you ship user-visible changes, bump it and add an entry at the top of `CHANGELOG` in `src/data/changelog.ts`.
 
 ## Stack and commands
 
-React 18, TypeScript (strict), Vite 6, Zustand 5 (state), Dexie 4 (IndexedDB), motion 12 (`motion/react`, animations), vite-plugin-pwa (Workbox service worker), Vitest + jsdom + fake-indexeddb (tests). Package manager: **pnpm** (`.npmrc` uses a hoisted node-linker).
+React 18, TypeScript (strict), Vite 6, Zustand 5 (state), Dexie 4 (IndexedDB), motion 12 (`motion/react`, animations), vite-plugin-pwa (Workbox service worker), Capacitor 8 (Android app), Vitest + jsdom + fake-indexeddb (tests). Package manager: **pnpm** (`.npmrc` uses a hoisted node-linker).
 
 ```sh
 pnpm install
@@ -37,9 +38,14 @@ pnpm test         # vitest: engine, matcher, persistence, full-UI tests
 pnpm typecheck    # tsc -b
 pnpm build        # typecheck + production build to dist/
 pnpm preview      # serve dist/ (service worker active) — use to test offline/PWA
+pnpm android:sync # build + copy dist/ into android/ (only needed for a local Gradle build)
 ```
 
+In this Termux/proot sandbox pnpm isn't on PATH: use `corepack pnpm …`.
+
 CI (`.github/workflows/deploy.yml`): on every push and PR it runs install, test and build. On `main` it also deploys `dist/` to **GitHub Pages**. The repo's Pages source must be set to "GitHub Actions".
+
+`.github/workflows/android.yml` builds the **APK** on every push and PR (no Android Studio; the runner has Java 21 and the Android SDK): `pnpm build` → `cap sync android` → `gradlew assembleRelease`. The APK is attached to the run as an artifact. On `main` it is also published as GitHub Release `v<version>` (re-uploaded if that release exists). Signing uses repo secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` (PKCS12, alias `orderboard`). Without them it builds a debug APK. **The same key must sign every update**, or Android refuses to update and the user would have to uninstall, which deletes their data. The owner keeps the key backup. Never regenerate it.
 
 There is no browser in the agent sandbox. UI behaviour is verified by `src/App.test.tsx`, which renders the real `<App/>` in jsdom and clicks through it. Visual and layout checks need a real phone or browser (`pnpm dev`, then open on the phone over LAN, or use Chrome devtools device mode).
 
@@ -67,7 +73,10 @@ src/store/
   appStore.ts              Zustand store: data + UI state + all actions; persistence plumbing; undo stack
   exports.ts               CSV/PDF report export, full-backup export
 src/reports/reports.ts     CSV builder + printable letterhead HTML
-src/platform/              adapters to swap for Capacitor later: files.ts, haptics.ts, voice.ts
+src/platform/              browser vs Android-app adapters: native.ts (isNative, lazy), files.ts (save/share/pick/print), haptics.ts, voice.ts
+android/                   Capacitor Android project (committed). Icons in res/mipmap-*, launch theme in res/values/styles.xml,
+                           PrintPlugin.java (app-local "Print" plugin), versionCode/Name read from package.json in app/build.gradle
+capacitor.config.json      appId com.melhive.orderboard, webDir dist, SystemBars insets → env(safe-area-inset-*)
 src/agent/
   engine.ts                respond(input, world, ctx) → reply (PURE; never mutates); also insights()/statusLine()
   knowledge.ts             how-to topics for every feature, small talk (EN/Taglish), isTaglish()
@@ -104,6 +113,17 @@ legacy/                    v15 single-file app (reference only)
 
 **Voice.** `platform/voice.ts` uses the Web Speech API (en-PH, falls back to en-US). Chrome on Android needs internet for recognition (Google service); typing always works offline. Text-to-speech is optional (`settings.agent.voiceReplies`). Hands-free mode re-listens after each spoken reply. Talk mode (`TalkScreen`) is a dedicated loop that greets with `statusLine()` and the top tip, keeps the screen on (`keepScreenOn`), re-listens quietly twice on silence, then waits for a tap. It uses a Filipino TTS voice for Taglish replies when the phone has one. Everything said in Talk mode is also kept in the chat history.
 
+**Android app (Capacitor).** The same `dist/` runs in a WebView from `https://localhost`. Its storage (IndexedDB) is separate from the PWA's Chrome storage, so users move data with Export all data → Import backup. Everything native lives in `src/platform/` behind `isNative()`, and plugins are loaded with `lazy(() => import(...))` so the PWA bundle doesn't run them. Never return a Capacitor plugin object from a promise: it's a proxy that answers `.then`. In the app:
+- **voice** uses `@capacitor-community/speech-recognition` (one utterance, final text only, no live partials, because the plugin drops errors in partial mode; en-PH, or en-US when offline) and `@capacitor-community/text-to-speech` (fil-PH → en-PH → en-US).
+- **keepScreenOn** uses `@capacitor-community/keep-awake`.
+- **files** writes to `Documents/Order Board` and opens the share sheet.
+- **PDF reports** call the app-local `Print` plugin (`webView.createPrintDocumentAdapter`) instead of `window.print()`, which the WebView doesn't support.
+- **haptics** uses `@capacitor/haptics`.
+- **Back** uses `@capacitor/app` `backButton` (at the root it calls `minimizeApp()`).
+- **System bar** icons follow the theme through `SystemBars.setStyle`. `main.tsx` flushes on Capacitor's `pause` event and skips the service worker.
+
+`allowBackup` is off and `data_extraction_rules.xml` excludes everything, so sales data never goes to Google's cloud backup (matches the Privacy Policy). Icons are rendered from `public/logo.svg` (adaptive foreground/background plus monochrome). If the logo changes, regenerate every `mipmap-*` PNG.
+
 **PWA / updates.** Workbox precaches the build. `registerType: "autoUpdate"` activates new versions and reloads. The SW filename stays `sw.js`, so phones still running the legacy app pick up v16 as a normal SW update. `main.tsx` deletes the legacy `order-board-vNN` caches.
 
 ## Invariants: do not break these
@@ -113,7 +133,8 @@ legacy/                    v15 single-file app (reference only)
 3. **Never lose sales.** Destructive actions on sales history (Delete Order, Reset Today) require typing a random 4-character code. Restoring a backup replaces everything and must be confirmed. The agent may never delete or reset history. Prefer Undo over "Are you sure?" for small actions.
 4. **Business-day logic** goes through `businessDay.ts`, keyed by settings `workStart`/`workEnd`.
 5. **Engine purity.** `engine.respond()` must not touch the store. New agent abilities = a new `Plan` kind in `types.ts` + its handler in `executor.ts` + tests in `engine.test.ts`.
-6. **`base: "./"`** and relative asset paths, so the build works on GitHub Pages subpaths and in a future Capacitor WebView.
+6. **`base: "./"`** and relative asset paths, so the build works on GitHub Pages subpaths and in the Capacitor WebView.
+8. **Android signing key and `appId`** never change (see CI above). Every Android release needs a higher `package.json` version, because `versionCode` comes from it (19.0.0 → 190000).
 7. **Legal text changes** require bumping `LEGAL_VERSION` (users re-accept via the welcome gate).
 
 ## Adding things (recipes)
@@ -139,5 +160,7 @@ Run `pnpm test && pnpm typecheck` before declaring anything done.
 - [x] Pages source set to "GitHub Actions" (2026-11-08); every push to `main` now deploys.
 - [ ] Talk mode on a real phone: check speech recognition in a noisy stall, the Filipino TTS voice, and that the screen stays on.
 - [ ] Test on the actual phone: install over the existing v15 PWA and confirm data migrates, offline works, the update reloads, and the Ask chat survives an app restart.
-- [ ] Optional: Play Store via Capacitor. Swap the adapters in `src/platform/` (files → @capacitor/filesystem + share, haptics → @capacitor/haptics, voice → @capacitor-community/speech-recognition + text-to-speech, because the Android WebView has no SpeechRecognition). Nothing outside `platform/` should need to change.
+- [x] Capacitor Android app (v19): adapters swapped in `src/platform/`, APK built and signed by CI.
+- [ ] Android app on the real phone: install, import the PWA backup, then check voice (online and offline), Talk mode keep-awake, backup/CSV save + share, PDF via print, back button, status bar in both themes, and the app icon.
+- [ ] Optional: Play Store. Needs a $25 developer account, an AAB (`bundleRelease`), a public privacy-policy URL, the real contact email, and (for new personal accounts) a 12-tester, 14-day closed test.
 - [ ] Optional: bundle size (~495 KB JS, ~163 KB gzip, mostly React + motion) could shrink with `LazyMotion`. It's fine for a precached PWA.

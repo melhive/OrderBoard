@@ -1,7 +1,7 @@
 {
   "name": "order-board",
   "private": true,
-  "version": "18.0.0",
+  "version": "19.0.0",
   "type": "module",
   "description": "Order Board — offline order taking and sales tracking for street food stalls.",
   "scripts": {
@@ -10,9 +10,19 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "android:sync": "pnpm build && cap sync android"
   },
   "dependencies": {
+    "@capacitor-community/keep-awake": "8.0.1",
+    "@capacitor-community/speech-recognition": "7.0.1",
+    "@capacitor-community/text-to-speech": "8.0.2",
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.0",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/share": "8.0.3",
     "dexie": "4.0.11",
     "motion": "12.15.0",
     "react": "18.3.1",
@@ -20,15 +30,16 @@
     "zustand": "5.0.5"
   },
   "devDependencies": {
-    "typescript": "5.8.3",
-    "vite": "6.3.5",
-    "@vitejs/plugin-react": "4.5.0",
-    "vite-plugin-pwa": "1.0.0",
-    "vitest": "3.1.4",
-    "fake-indexeddb": "6.0.1",
+    "@capacitor/cli": "8.6.0",
     "@types/react": "18.3.23",
     "@types/react-dom": "18.3.7",
-    "jsdom": "26.1.0"
+    "@vitejs/plugin-react": "4.5.0",
+    "fake-indexeddb": "6.0.1",
+    "jsdom": "26.1.0",
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vite-plugin-pwa": "1.0.0",
+    "vitest": "3.1.4"
   },
   "packageManager": "pnpm@9.15.9"
 }

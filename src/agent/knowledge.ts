@@ -218,9 +218,9 @@ export const TOPICS: Topic[] = [
   },
   {
     id: "install",
-    keys: ["install", "update", "home screen", "app icon", "new version", "icon"],
-    en: "In Chrome, open the menu ⋮ → “Install app” / “Add to Home screen”. Updates install by themselves: close and reopen the app to get the newest version. Don’t uninstall to update — uninstalling can delete your data.",
-    tl: "Sa Chrome, ⋮ → “Install app”. Kusang nag-a-update: isara at buksan ulit ang app. Huwag i-uninstall para mag-update — puwedeng mabura ang data.",
+    keys: ["install", "update", "home screen", "app icon", "new version", "icon", "apk"],
+    en: "Web version: in Chrome, open the menu ⋮ → “Install app”; it updates by itself when you close and reopen it. Android app (APK): to update, open the new APK and tap Update — it installs over the old one and keeps your data. Never uninstall to update — uninstalling deletes your data.",
+    tl: "Web version: sa Chrome, ⋮ → “Install app”; kusang nag-a-update. Android app (APK): buksan ang bagong APK at i-tap ang Update — hindi mabubura ang data. Huwag i-uninstall para mag-update — mabubura ang data.",
     link: { label: "What’s new", route: { name: "changelog" } },
   },
   {

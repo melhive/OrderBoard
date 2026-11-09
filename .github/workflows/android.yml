@@ -1,0 +1,110 @@
+name: Android APK
+
+# Builds the Capacitor Android app. No Android Studio needed: GitHub's
+# runners have Java and the Android SDK.
+# - Every push/PR: builds the APK and attaches it to the run (Actions → run → Artifacts).
+# - Push to main: also publishes it as a GitHub Release "vX.Y.Z", so the phone
+#   can download it from the repo's Releases page.
+# Signing: the release key comes from repository secrets
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS.
+# Without them (e.g. a PR from a fork) a debug APK is built instead.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: pnpm install --frozen-lockfile
+      - name: Build web app
+        run: pnpm build
+      - name: Copy web app into the Android project
+        run: pnpm exec cap sync android
+
+      - name: Signing key
+        id: key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/orderboard.p12"
+            echo "ORDERBOARD_KEYSTORE=$RUNNER_TEMP/orderboard.p12" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No signing key secrets: building a debug APK (can't update a release install)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build APK
+        working-directory: android
+        env:
+          ORDERBOARD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORDERBOARD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          if [ "${{ steps.key.outputs.signed }}" = "true" ]; then
+            ./gradlew --no-daemon assembleRelease
+          else
+            ./gradlew --no-daemon assembleDebug
+          fi
+
+      - name: Name the APK
+        id: apk
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ steps.key.outputs.signed }}" = "true" ]; then
+            SRC=android/app/build/outputs/apk/release/app-release.apk
+            NAME="OrderBoard-$VERSION.apk"
+          else
+            SRC=android/app/build/outputs/apk/debug/app-debug.apk
+            NAME="OrderBoard-$VERSION-debug.apk"
+          fi
+          mkdir -p out && cp "$SRC" "out/$NAME"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "out/$NAME" | head -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: out/${{ steps.apk.outputs.name }}
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && steps.key.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.apk.outputs.version }}
+          NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" "out/$NAME" --clobber
+          else
+            gh release create "v$VERSION" "out/$NAME" --target "$GITHUB_SHA" --title "Order Board v$VERSION" \
+              --notes "Android app. On the phone: download $NAME, open it and tap Install (or Update). Updating keeps your data — never uninstall to update."
+          fi
