@@ -199,8 +199,14 @@ export function speak(text: string, onEnd?: () => void, opts: { tagalog?: boolea
     return;
   }
   const synth = window.speechSynthesis;
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(forSpeech(text));
+  let u: SpeechSynthesisUtterance;
+  try {
+    synth.cancel();
+    u = new SpeechSynthesisUtterance(forSpeech(text));
+  } catch {
+    onEnd?.();
+    return;
+  }
   const v = pickVoice(!!opts.tagalog);
   if (v) u.voice = v;
   u.lang = v?.lang ?? "en-US";
@@ -213,7 +219,13 @@ export function speak(text: string, onEnd?: () => void, opts: { tagalog?: boolea
   };
   u.onend = finish;
   u.onerror = finish;
-  synth.speak(u);
+  try {
+    synth.speak(u);
+  } catch {
+    // A broken TTS engine must not take the screen down; just move on.
+    finish();
+    return;
+  }
   // Some Android voices never fire onend; don't let the conversation stall.
   setTimeout(finish, 2500 + forSpeech(text).length * 90);
 }

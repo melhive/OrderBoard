@@ -485,13 +485,15 @@ export function AskScreen() {
           {listening ? (
             <div className="listening" role="status">
               <span className="wave" aria-hidden>
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <motion.i key={i} animate={{ height: [6, 20, 8, 16, 6] }} transition={{ repeat: Infinity, duration: 1.1, delay: i * 0.12, ease: "easeInOut" }} />
-                ))}
+                <i />
+                <i />
+                <i />
+                <i />
+                <i />
               </span>
               <span className={`ltext${partial ? "" : " placeholder"}`}>{partial || "Listening… say an order"}</span>
               <button className="cbtn live" aria-label="Stop listening" onClick={listen}>
-                <motion.span className="ring" initial={{ scale: 1, opacity: 0.45 }} animate={{ scale: 1.7, opacity: 0 }} transition={{ repeat: Infinity, duration: 1.3 }} />
+                <span className="ring" aria-hidden />
                 <IconStop />
               </button>
             </div>

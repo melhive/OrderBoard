@@ -243,29 +243,25 @@ export function TalkScreen() {
         </div>
 
         <div className="talk-orb-wrap">
+          {/* Pure CSS animations (transform/opacity only): they run on the
+              phone's compositor, so they stay smooth while speech is busy,
+              and nothing is re-created when the phase changes — layers just
+              fade in and out. */}
           <button className="talk-orb" onClick={tapOrb} aria-label={label}>
-            {(phase === "listening" || phase === "speaking") &&
-              [0, 1, 2].map((i) => (
-                <motion.span
-                  key={`${phase}-${i}`}
-                  className="talk-ring"
-                  initial={{ scale: 1, opacity: 0.35 }}
-                  animate={{ scale: phase === "listening" ? 1.45 : 1.3, opacity: 0 }}
-                  transition={{ repeat: Infinity, duration: phase === "listening" ? 1.8 : 1.2, delay: i * 0.5, ease: "easeOut" }}
-                />
-              ))}
-            <motion.span
-              className="talk-core"
-              animate={
-                phase === "speaking" ? { scale: [1, 1.08, 0.97, 1.05, 1] } :
-                phase === "thinking" ? { rotate: 360 } :
-                phase === "listening" ? { scale: [1, 1.04, 1] } :
-                { scale: 1 }
-              }
-              transition={phase === "thinking" ? { repeat: Infinity, duration: 1.2, ease: "linear" } : { repeat: phase === "paused" || phase === "error" ? 0 : Infinity, duration: phase === "speaking" ? 0.9 : 1.6 }}
-            >
-              {phase === "thinking" ? <span className="talk-spinner" /> : <IconMic />}
-            </motion.span>
+            <span className="talk-rings" aria-hidden>
+              <span className="talk-ring" />
+              <span className="talk-ring" />
+              <span className="talk-ring" />
+            </span>
+            <span className="talk-glow" aria-hidden />
+            <span className="talk-core">
+              <span className="talk-icon talk-icon-mic">
+                <IconMic />
+              </span>
+              <span className="talk-icon talk-icon-wait">
+                <span className="talk-spinner" />
+              </span>
+            </span>
           </button>
           <div className="talk-label">{label}</div>
           <AnimatePresence mode="wait">
