@@ -6,6 +6,7 @@ export const CHANGELOG: { version: string; changes: string[] }[] = [
     "Order Board is now also a real Android app (APK): everything is built in, so it works offline from the first open",
     "In the Android app, voice uses the phone’s own speech recognition — it can work without internet if the phone has Google’s offline speech pack — and replies are read aloud by the phone’s voice",
     "Android app: backups and CSV reports are saved in Documents/Order Board and can be shared; PDF reports open Android’s print screen (choose “Save as PDF”)",
+    "Ask Agent takes orders in Bisaya too: “isa ka pares with egg og duha ka mami”, “usa ka pastil ug softdrinks sa table 3”, “dugangi og usa ka mami” (replies stay in English/Taglish)",
     "Moving from the web version: use Settings → Export all data there, then use Import backup in the app",
   ]},
   { version: "v18", changes: [

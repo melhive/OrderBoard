@@ -142,6 +142,7 @@ legacy/                    v15 single-file app (reference only)
 - **New dialog:** add a variant to `Dialog` in `appStore.ts`, a component plus a `case` in `src/ui/Dialogs.tsx`, and open it with `openDialog({...})`.
 - **New screen:** add to `Route` in `appStore.ts`, a `case` in `App.tsx` `Screen` and `routeKey`, then navigate with `push({ name })`. Use `screen no-nav` and `<TopBar title><BackButton/></TopBar>` for sub-screens.
 - **New setting:** see invariant 1, then add UI in `SettingsScreen.tsx`.
+- **Bisaya (Cebuano)** is supported for *taking orders only* (v19): numbers usa/duha/tulo/upat/unom/napulo, the `ka` linker after numbers (also glued, as in "duhaka"), og/ug = and, (nga) naay = with, kan-on = rice, buok = pieces, dugang(i) = add, "usa pa ka X" = 1 X. These live in `TOKEN_SYNONYMS`/`PHRASE_SYNONYMS`. Replies stay English/Taglish. Tests are under "Bisaya orders" in `engine.test.ts`.
 - **New agent phrase or mishearing:** first try `TOKEN_SYNONYMS` / `PHRASE_SYNONYMS` in `agent/text.ts` or menu item aliases. Always add a test.
 - **Styling:** use tokens (`--shell-*` for app chrome, `--paper`/`--ink` for cards, sheets and dialogs, `--chili` actions, `--accent-gold` labels/prices, `--leaf` money in). Check both themes. Mobile-first: 16px gutters, 44px+ tap targets, no horizontal scroll.
 

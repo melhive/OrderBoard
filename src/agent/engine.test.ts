@@ -589,3 +589,54 @@ describe("follow-up questions keep their confirmations", () => {
     expect(app().data.history).toHaveLength(1);
   });
 });
+
+// ---------------- Bisaya orders ----------------
+describe("Bisaya orders", () => {
+  const atTable = (id: number) => useApp.setState({ stack: [{ name: "tables" }, { name: "order", tableId: id }] });
+
+  it("takes the owner's examples on a table's order screen", () => {
+    atTable(3);
+    say("isa ka pares with egg og duha ka mami");
+    expect(bill(3)).toEqual(["1x Pares w/ Egg", "2x Mami"]);
+    say("Isa ka pastil og softdrinks");
+    expect(bill(3)).toEqual(["1x Pares w/ Egg", "2x Mami", "1x Pastil", "1x Softdrinks"]);
+  });
+
+  it("understands Bisaya numbers, ug/og and a spoken table", () => {
+    say("duha ka siomai ug usa ka coke para sa table 2");
+    expect(bill(2)).toEqual(["2x Siomai", "1x Softdrinks"]);
+    say("tulo ka mami nga naay itlog sa table 4");
+    expect(bill(4)).toEqual(["3x Mami w/ Egg"]);
+    say("upat ka pastil, unom ka siomai table 1");
+    expect(bill(1)).toEqual(["4x Pastil", "6x Siomai"]);
+  });
+
+  it("knows kan-on (rice), buok (pieces) and napulo", () => {
+    say("usa ka pares with egg ug kan-on table 1");
+    expect(bill(1)).toEqual(["1x Pares w/ Egg & Rice"]);
+    say("napulo ka buok siomai table 2");
+    expect(bill(2)).toEqual(["10x Siomai"]);
+  });
+
+  it("adds more with dugangi / usa pa", () => {
+    atTable(3);
+    say("duha ka mami");
+    say("dugangi og usa ka mami");
+    expect(bill(3)).toEqual(["3x Mami"]);
+    say("usa pa ka pastil");
+    expect(bill(3)).toEqual(["3x Mami", "1x Pastil"]);
+  });
+
+  it("copes with how the mic writes Bisaya", () => {
+    atTable(5);
+    say("isaka pares with egg og duhaka mami");
+    expect(bill(5)).toEqual(["1x Pares w/ Egg", "2x Mami"]);
+  });
+
+  it("doesn't change Tagalog or English orders", () => {
+    say("dalawang mami at isang pastil table 1");
+    expect(bill(1)).toEqual(["2x Mami", "1x Pastil"]);
+    say("one siomai and a coke for table 2");
+    expect(bill(2)).toEqual(["1x Siomai", "1x Softdrinks"]);
+  });
+});
