@@ -422,6 +422,7 @@ button.srow:active { background: var(--surface-2); }
 .sico.green { background: var(--green-soft); color: var(--green); }
 .sico.blue { background: var(--blue-soft); color: var(--blue); }
 .sico.purple { background: var(--purple-soft); color: var(--purple); }
+.srow.link-row { color: inherit; text-decoration: none; }
 .sico.gray { background: var(--surface-2); color: var(--text-2); }
 .smain { flex: 1; min-width: 0; }
 .smain b { display: block; font-size: 15px; font-weight: 600; }

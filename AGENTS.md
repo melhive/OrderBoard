@@ -45,7 +45,7 @@ In this Termux/proot sandbox pnpm isn't on PATH: use `corepack pnpm …`.
 
 CI (`.github/workflows/deploy.yml`): on every push and PR it runs install, test and build. On `main` it also deploys `dist/` to **GitHub Pages**. The repo's Pages source must be set to "GitHub Actions".
 
-`.github/workflows/android.yml` builds the **APK** on every push and PR (no Android Studio; the runner has Java 21 and the Android SDK): `pnpm build` → `cap sync android` → `gradlew assembleRelease`. The APK is attached to the run as an artifact. On `main` it is also published as GitHub Release `v<version>` (re-uploaded if that release exists). Signing uses repo secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` (PKCS12, alias `orderboard`). Without them it builds a debug APK. **The same key must sign every update**, or Android refuses to update and the user would have to uninstall, which deletes their data. The owner keeps the key backup. Never regenerate it.
+`.github/workflows/android.yml` builds the **APK** on every push and PR (no Android Studio; the runner has Java 21 and the Android SDK): `pnpm build` → `cap sync android` → `gradlew assembleRelease`. The APK is attached to the run as an artifact. On `main` it is also published as GitHub Release `v<version>`, marked Latest, with the fixed file name `OrderBoard.apk`, so **https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk always downloads the newest app**. That link is used in `README.md` and in the app (About → Latest Android app, `APP_DOWNLOAD_URL` in `changelog.ts`). If that release already exists, the APK is re-uploaded. The release notes come from the newest `CHANGELOG` entry (`scripts/release-notes.mjs`). Every PR from this repo replaces the **`preview`** pre-release with its signed APK (`releases/download/preview/OrderBoard-preview.apk`), so the owner can test on the phone before merging. Signing uses repo secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` (PKCS12, alias `orderboard`). Without them it builds a debug APK. **The same key must sign every update**, or Android refuses to update and the user would have to uninstall, which deletes their data. The owner keeps the key backup. Never regenerate it.
 
 There is no browser in the agent sandbox. UI behaviour is verified by `src/App.test.tsx`, which renders the real `<App/>` in jsdom and clicks through it. Visual and layout checks need a real phone or browser (`pnpm dev`, then open on the phone over LAN, or use Chrome devtools device mode).
 
@@ -89,6 +89,8 @@ src/screens/               Tables, Order, Summary, Utang, Settings, MenuEditor, 
 src/ui/                    components (TopBar, BottomNav, Switch, Segmented, Toast), Dialogs, Icons, hooks
 src/legal/content.ts       Privacy Policy + Terms text, LEGAL_VERSION
 legacy/                    v15 single-file app (reference only)
+README.md                  GitHub front page: download link, highlights (keep it user-facing)
+scripts/release-notes.mjs  release notes for the APK release (from the newest CHANGELOG entry)
 ```
 
 ## How it works
@@ -133,7 +135,7 @@ legacy/                    v15 single-file app (reference only)
 ## Invariants: do not break these
 
 1. **Data compatibility.** `Txn`, `Split`, `OrderItem`, `TableDef`, `MenuCategory` field names match the v1–v15 format, so old backups import without conversion. Add new fields as **optional**. Add new settings in `types.ts`, `defaults.ts` **and** `cleanSettings()` in `migrate.ts`. Anything read from storage or a file passes through `normalizeAppData()`.
-2. **Offline-first.** No runtime network calls, CDNs, web fonts, analytics or remote APIs. Everything needed to take an order ships in the precache. The only network use is the browser's own speech recognition, which is disclosed in the Privacy Policy.
+2. **Offline-first.** No runtime network calls, CDNs, web fonts, analytics or remote APIs. Everything needed to take an order ships in the precache. The only network use is the browser's own speech recognition, which is disclosed in the Privacy Policy. (Plain links the user taps, like About → Latest Android app, are fine. The app never checks for updates by itself.)
 3. **Never lose sales.** Destructive actions on sales history (Delete Order, Reset Today) require typing a random 4-character code. Restoring a backup replaces everything and must be confirmed. The agent may never delete or reset history. Prefer Undo over "Are you sure?" for small actions.
 4. **Business-day logic** goes through `businessDay.ts`, keyed by settings `workStart`/`workEnd`.
 5. **Engine purity.** `engine.respond()` must not touch the store. New agent abilities = a new `Plan` kind in `types.ts` + its handler in `executor.ts` + tests in `engine.test.ts`.

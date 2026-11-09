@@ -1,6 +1,9 @@
 // Single source of truth for the app version shown in the UI.
 export const APP_VERSION = `v${__APP_VERSION__.split(".")[0]}`;
 
+/** Always the newest signed Android app (GitHub's "latest release" link; see .github/workflows/android.yml). */
+export const APP_DOWNLOAD_URL = "https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk";
+
 export const CHANGELOG: { version: string; changes: string[] }[] = [
   { version: "v19", changes: [
     "Order Board is now also a real Android app (APK): everything is built in, so it works offline from the first open",

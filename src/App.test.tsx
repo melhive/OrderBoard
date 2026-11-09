@@ -330,6 +330,14 @@ describe("settings and menu", () => {
     expect(cat.cat).toBe("Desserts");
     expect(cat.items[0]).toMatchObject({ name: "Halo-halo", price: 70 });
   });
+
+  it("About links to the latest Android app", () => {
+    click(byLabel("Settings"));
+    click(button(/About Order Board/));
+    const link = [...document.querySelectorAll<HTMLAnchorElement>("a.srow")].find((a) => /Latest Android app/.test(a.textContent!))!;
+    expect(link.href).toBe("https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk");
+    expect(link.target).toBe("_blank");
+  });
 });
 
 describe("Android back button", () => {

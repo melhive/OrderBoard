@@ -5,8 +5,10 @@ name: Android APK
 # The runner image ships the Android SDK (ANDROID_HOME, licenses accepted);
 # Gradle downloads any missing platform itself.
 # - Every push/PR: builds the APK and attaches it to the run (Actions → run → Artifacts).
-# - Push to main: also publishes it as a GitHub Release "vX.Y.Z", so the phone
-#   can download it from the repo's Releases page.
+# - Push to main: also publishes it as GitHub Release "vX.Y.Z" (marked Latest)
+#   with the file OrderBoard.apk, so this link always gives the newest version:
+#     https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk
+#   Release notes = the newest entry of src/data/changelog.ts (scripts/release-notes.mjs).
 # - PR from this repo: replaces the "preview" pre-release with the new APK, so
 #   the latest test build is always a plain .apk (no zip) at
 #   releases/download/preview/OrderBoard-preview.apk
@@ -106,12 +108,19 @@ jobs:
           VERSION: ${{ steps.apk.outputs.version }}
           NAME: ${{ steps.apk.outputs.name }}
         run: |
+          # Always the same file name, so this link gives the newest version:
+          #   https://github.com/<repo>/releases/latest/download/OrderBoard.apk
+          cp "out/$NAME" out/OrderBoard.apk
+          node scripts/release-notes.mjs "$GITHUB_REPOSITORY" OrderBoard.apk > notes.md
           if gh release view "v$VERSION" >/dev/null 2>&1; then
-            gh release upload "v$VERSION" "out/$NAME" --clobber
+            gh release upload "v$VERSION" out/OrderBoard.apk --clobber
+            gh release edit "v$VERSION" --notes-file notes.md --latest
           else
-            gh release create "v$VERSION" "out/$NAME" --target "$GITHUB_SHA" --title "Order Board v$VERSION" \
-              --notes "Android app. On the phone: download $NAME, open it and tap Install (or Update). Updating keeps your data — never uninstall to update."
+            gh release create "v$VERSION" out/OrderBoard.apk --target "$GITHUB_SHA" \
+              --title "Order Board $VERSION" --notes-file notes.md --latest
           fi
+          echo "### Released v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/OrderBoard.apk" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish preview (test build from a PR)
         if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.key.outputs.signed == 'true'
