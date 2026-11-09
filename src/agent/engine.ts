@@ -337,6 +337,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
   const data = world.data;
   const index = menuIndex(data);
   const tl = isTaglish(raw);
+  world = { ...world, tl };
 
   if (toks.length <= 3 && toks.every((t) => YES.has(t) || NO.has(t) || t === "po")) {
     return { reply: { text: "There’s nothing waiting for a yes or no right now. Tell me an order, or ask about a table or your sales.", suggestions: ["Which tables are open?", "Sales today"] }, ctx };
@@ -352,6 +353,30 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
   if (has(toks, "help", "commands", "examples") && toks.length <= 3 || hasPhrase(norm, "what can you do", "how to use", "what can i say", "what else can you do", "anong kaya mo", "what kaya mo")) {
     return { reply: helpReply(), ctx };
   }
+  // Names: "ako si Rommel", "my name is Rommel", "call me Kuya"; "ano pangalan ko?"
+  const intro = /^(?:ako si|ako ay si|my name is|my names|call me|tawagin mo akong|tawagin mo ako ng|tawagin mo kong|pangalan ko ay|pangalan ko|ang pangalan ko ay|im|i am)\s+([a-zñ][a-zñ'.-]*(?:\s+[a-zñ][a-zñ'.-]*)?)\s*(?:po|na lang|nalang)?$/.exec(norm);
+  if (intro && !(/^(?:im|i am)\b/.test(norm) && NOT_A_NAME.test(intro[1]!))) {
+    const name = intro[1]!.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    return {
+      reply: {
+        text: tl ? `Ikinagagalak kitang makilala, ${name}!` : `Nice to meet you, ${name}!`,
+        execute: { kind: "setOwnerName", name },
+        meta: { kind: "chat", topic: "myname", tl, bisaya: false, name },
+      },
+      ctx,
+    };
+  }
+  // (Tokens are normalized: "what's" → "what", "ano/anong" → "what".)
+  if (hasPhrase(norm, "what is my name", "what my name", "do you know my name", "know my name", "what pangalan ko", "sino ako", "kilala mo ba ako", "who am i", "unsa akong ngalan")) {
+    const n = data.settings.agent.ownerName;
+    return {
+      reply: {
+        text: n ? (tl ? `Ikaw si ${n}!` : `You’re ${n}!`) : tl ? "Hindi mo pa sinasabi — sabihin mo lang “ako si …”." : "You haven’t told me yet — just say “my name is …”.",
+        meta: { kind: "chat", topic: "whatsmyname", tl, bisaya: false, name: n },
+      },
+      ctx,
+    };
+  }
   const chat = smallTalk(norm, raw, world.now.getHours());
   if (chat) {
     let text = tl ? chat.tl : chat.en;
@@ -360,7 +385,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
       text += ` ${statusLine(world, tl)}${top ? ` ${top.text}` : ""}`;
       if (/^(hi|hello|hey|good|magandang|kumusta|kamusta|musta|uy|oy|yo)/.test(norm) && !tl) text = text.replace("I’m here.", "Ready to take orders.");
     }
-    return { reply: { text, suggestions: chat.status ? ["Which tables are open?", "Any tips?"] : undefined }, ctx };
+    return { reply: { text, suggestions: chat.status ? ["Which tables are open?", "Any tips?"] : undefined, meta: { kind: "chat", topic: chat.topic ?? "other", tl, bisaya: !!chat.bisaya, name: data.settings.agent.ownerName } }, ctx };
   }
   const topic = howTo(norm, raw);
   if (topic) {
@@ -375,7 +400,10 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
   if (corr) return corr;
 
   // ----- undo -----
-  if (/^(undo|revert|scratch that|take that back|undo that|undo last)\b/.test(norm) || norm === "oops") {
+  // "undo", "undo table 4", "ibalik table 4" (the last change on that table only).
+  if ((/^(undo|revert|scratch that|take that back|undo that|undo last|ibalik|bawiin)\b/.test(norm) || norm === "oops") && !hasPhrase(norm, "undo payment", "undo paid", "undo the payment")) {
+    const ut = extractTable(toks, data);
+    if (ut.tableId !== null) return { reply: { text: "Undone.", execute: { kind: "undo", tableId: ut.tableId } }, ctx: rememberTable(ctx, ut.tableId, world) };
     return { reply: { text: "Undone.", execute: { kind: "undo" } }, ctx };
   }
 
@@ -577,7 +605,19 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
   if (removeWords) {
     const cleaned = rest.filter((t) => !["remove", "delete", "minus", "less", "drop", "cancel", "subtract", "deduct", "take", "off", "away", "from", "no", "more", "not", "dont", "want", "the"].includes(t));
     const parsed = parseItems(cleaned, index);
-    const tableId = explicitTable ?? contextTable(world, ctx);
+    let tableId = explicitTable ?? contextTable(world, ctx);
+    if (parsed.lines.length && explicitTable === null) {
+      // "cancel pares" with no table: use the table that actually has it.
+      const hasAll = (tid: number) => parsed.lines.every((p) => (data.tables[tid] ?? []).some((sp) => sp.items.some((i) => i.name === p.item.name)));
+      if (tableId === null || !hasAll(tableId)) {
+        const holders = data.tableList.map((t) => t.id).filter(hasAll);
+        if (holders.length === 1) tableId = holders[0]!;
+        else if (holders.length > 1) {
+          const what = parsed.lines.map((p) => p.item.name).join(" and ");
+          return askTable(ctx, world, `${what} is on ${holders.map((h) => tableName(data, h)).join(" and ")}. Which table?`, (tid, w) => removeReply(w, tid, parsed.lines, cleaned));
+        }
+      }
+    }
     if (parsed.lines.length) {
       if (tableId === null) return askTable(ctx, world, "Which table should I remove that from?", (tid, w) => removeReply(w, tid, parsed.lines, cleaned));
       return { reply: removeReply(world, tableId, parsed.lines, cleaned), ctx: rememberTable(ctx, tableId, world) };
@@ -660,6 +700,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
       text: "Sorry, I didn’t understand that. Try an order like “2 mami and a water for table 1”, or a question like “how much did we sell today?”.",
       suggestions: ["What can you do?", "Which tables are open?", "Show the menu"],
       tone: "warn",
+      meta: { kind: "unknown", tl, tableName: explicitTable !== null ? tableName(data, explicitTable) : undefined },
     },
     ctx,
   };
@@ -760,7 +801,8 @@ function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[
   }
   if (unknown.length === 1 && unknown[0]!.split(" ").length <= 3) nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: unknown[0]!, qty: unknownQty, tableId, split } };
   nextCtx = { ...nextCtx, lastAdd: { tableId, split, lines, at: world.now.getTime() } };
-  return { reply: { text, speak, execute: plan, undoable: true, card }, ctx: nextCtx };
+  const meta = unknown.length ? undefined : ({ kind: "added", table: name, items: linesText(lines), units: lines.reduce((u, l) => u + l.qty, 0), total: card.kind === "bill" ? card.total : 0, tl: !!world.tl } as const);
+  return { reply: { text, speak, execute: plan, undoable: true, card, meta }, ctx: nextCtx };
 }
 
 function removeReply(world: World, tableId: number, parsed: ParsedLine[], tokens: string[]): AgentReply {
@@ -781,7 +823,9 @@ function removeReply(world: World, tableId: number, parsed: ParsedLine[], tokens
   }
   if (!removals.length) return { text: `${name} doesn’t have ${missing.join(" or ")} on its bill.`, card: billCard(world, tableId, split), tone: "warn" };
   const desc = removals.map((r) => (r.qty === "all" ? r.name : `${r.qty}× ${r.name}`)).join(", ");
+  const after = billCard(world, tableId, split, [], removals);
   return {
+    meta: missing.length ? undefined : { kind: "removed", table: name, items: desc, total: after.kind === "bill" ? after.total : 0, tl: !!world.tl },
     text: `Removed ${desc} from ${name}.${missing.length ? ` (${missing.join(", ")} wasn’t on the bill.)` : ""}`,
     execute: { kind: "removeItems", tableId, split, items: removals },
     undoable: true,
@@ -822,9 +866,17 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
   const splitText = splits.length > 1 ? (chosen.length > 1 ? " (all bills)" : ` (Split ${chosen[0]! + 1})`) : "";
   if (method === "utang" && customer) {
     const owes = findAccount(data.history, customer)?.balance ?? 0;
-    return confirmReply(ctx, { kind: "pay", tableId, splits: chosen, method, customer }, `Put ${name}${splitText} (${peso(total)}) on ${customer}’s utang?${owes ? ` They already owe ${peso(owes)}.` : ""}`,
-      "Add to utang", `${name}${splitText} — ${peso(total)} added to ${customer}’s utang.${owes ? ` Total owed: ${peso(owes + total)}.` : ""}`, false,
-      { kind: "bill", title: `${name}${splitText} · utang`, lines, total, note: `Utang · ${customer}` });
+    // Done right away (no "are you sure?"): "undo" brings the bill back.
+    return {
+      reply: {
+        text: `${name}${splitText} — ${peso(total)} added to ${customer}’s utang.${owes ? ` Total owed: ${peso(owes + total)}.` : ""}`,
+        execute: { kind: "pay", tableId, splits: chosen, method, customer },
+        undoable: true,
+        meta: { kind: "utang", table: name, total, customer, tl: !!world.tl },
+        card: { kind: "bill", title: `${name}${splitText} · utang`, lines, total, note: `Utang · ${customer}`, tableId },
+      },
+      ctx,
+    };
   }
   const via = method === "gcash" ? " via GCash" : method === "maya" ? " via Maya" : "";
   const card: Card = {
@@ -834,8 +886,22 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
     total,
     note: cash !== undefined ? `Cash ${peso(cash)} · Change ${peso(cash - total)}` : undefined,
   };
-  return confirmReply(ctx, { kind: "pay", tableId, splits: chosen, cash, ...(method !== "cash" ? { method } : {}) }, `Mark ${name}${splitText} as paid${via}? Total ${peso(total)}.${changeText}`,
-    "Mark paid", `${name}${splitText} paid${via} — ${peso(total)} recorded.${changeText}`, false, method !== "cash" ? { ...card, note: `Paid${via}` } as Card : card);
+  // Payments happen right away (no "are you sure?"); "undo" or "undo table N" reopens the bill.
+  return {
+    reply: {
+      text: `${name}${splitText} paid${via} — ${peso(total)} recorded.${changeText}`,
+      speak: `${name} paid${via}, ${pesoSpoken(total)}.${cash !== undefined ? ` Change ${pesoSpoken(cash - total)}.` : ""}`,
+      execute: { kind: "pay", tableId, splits: chosen, cash, ...(method !== "cash" ? { method } : {}) },
+      undoable: true,
+      meta: (() => {
+        const dt = dayTotals(world);
+        const stillOpen = openTables(data).filter((o) => o.t.id !== tableId || chosen.length < nonEmpty.length).length;
+        return { kind: "paid" as const, table: name, total, method: method === "utang" ? "cash" : method, change: cash !== undefined ? cash - total : undefined, todayBefore: dt.today, yesterday: dt.yesterday, ordersBefore: dt.orders, stillOpen, tl: !!world.tl };
+      })(),
+      card: method !== "cash" ? ({ ...card, note: `Paid${via}` } as Card) : { ...card, note: card.note ?? "Paid · cash" },
+    },
+    ctx,
+  };
 }
 
 function secondTable(rest: string[], data: AppData, from: number): number | null {
@@ -985,7 +1051,9 @@ function menuManagement(raw: string, toks: string[], norm: string, world: World,
   if (has(toks, "menu")) {
     // Add: "add tapsilog to the menu for 95 under rice meals"
     if (has(toks, "add", "create", "new", "put")) {
-      const m = /(?:add|create|put|new(?: item)?)\s+(?:an? |new |item )*(.+?)\s+(?:to|on|in|into)\s+(?:the\s+)?menu\b(.*)$/i.exec(raw);
+      // "add menu item kwek kwek 20", "new menu item tapsilog for 95 under rice meals"
+      const alt = /(?:add|create|new|put)\s+(?:an?\s+)?(?:new\s+)?menu\s+item\s+(.+?)\s*(?:for|at|=|price|presyo)?\s*(?:₱|php)?\s*(\d+(?:\.\d+)?)\s*(?:pesos?)?(.*)$/i.exec(raw);
+      const m = alt ? ([alt[0], alt[1], ` for ${alt[2]}${alt[3] ?? ""}`] as unknown as RegExpExecArray) : /(?:add|create|put|new(?: item)?)\s+(?:an? |new |item )*(.+?)\s+(?:to|on|in|into)\s+(?:the\s+)?menu\b(.*)$/i.exec(raw);
       const name = m?.[1]?.replace(/^(an?|new|item)\s+/i, "").trim();
       const tail = m?.[2] ?? "";
       const priceM = /(\d+(?:\.\d+)?)/.exec(tail) ?? /(\d+(?:\.\d+)?)/.exec(raw);
@@ -1280,6 +1348,18 @@ function helpReply(): AgentReply {
 // =====================================================================
 
 const DAY_MS = 24 * 3600e3;
+
+/** Sales today and yesterday (business days), for the persona's remarks. */
+function dayTotals(world: World): { today: number; orders: number; yesterday: number } {
+  const d = world.data;
+  const t = summarize(txnsForPeriod(d.history, todaySpec(), d.settings, world.now));
+  const y = addDays(businessDayKey(world.now, d.settings), -1);
+  const ys = summarize(txnsForPeriod(d.history, { period: "custom", from: y, to: y }, d.settings, world.now));
+  return { today: t.total, orders: t.orders, yesterday: ys.total };
+}
+
+/** "I'm tired", "I'm hungry" are not names. */
+const NOT_A_NAME = /^(?:tired|hungry|busy|bored|sleepy|sorry|here|back|done|ok|okay|fine|good|great|sad|happy|pagod|gutom|so|not|a|the|ready|going|leaving|closing|off)\b/;
 
 function todaySpec(): PeriodSpec {
   return { period: "today" };
@@ -1606,8 +1686,12 @@ function askName(ctx: AgentContext, question: string, resume: (name: string, w: 
 }
 
 /** Parses a reply to "whose utang?" into a name. */
+const NAME_ANSWER_STOP = new Set(["table", "split", "paid", "pay", "add", "remove", "cancel", "clear", "undo", "move", "open", "order", "bill", "menu", "gcash", "maya", "cash", "help", "served", "note", "expense", "sold", "soldout"]);
+
 export function nameFromAnswer(raw: string): string | null {
   const words = raw.trim().replace(/[^A-Za-zÑñ\s'.-]/g, " ").split(/\s+/).filter(Boolean);
+  // A command instead of a name ("split table 2", "table 4 paid") isn't an answer.
+  if (/\d/.test(raw) || words.some((w) => NAME_ANSWER_STOP.has(w.toLowerCase()))) return null;
   const cleaned = words.filter((w) => !["si", "ni", "kay", "it", "is", "its", "name", "the", "for", "to", "po", "utang", "ni", "yung"].includes(w.toLowerCase()));
   if (!cleaned.length || cleaned.length > 4) return null;
   return titleName(cleaned.map((w) => w.toLowerCase()));
@@ -1631,9 +1715,15 @@ function utangReply(raw: string, toks: string[], norm: string, world: World, ctx
     const amount = all || !nums.length ? account.balance : Math.min(Math.max(...nums), account.balance);
     const method = has(toks, "gcash") ? "gcash" : has(toks, "maya") ? "maya" : "cash";
     const left = account.balance - amount;
-    return confirmReply(ctx, { kind: "payUtang", customer: account.name, amount, method },
-      `Record ${peso(amount)}${method !== "cash" ? ` (${method === "gcash" ? "GCash" : "Maya"})` : ""} from ${account.name} for utang? ${left > 0 ? `${peso(left)} will be left.` : "That pays it all off."}`,
-      "Record payment", `${account.name} paid ${peso(amount)}. ${left > 0 ? `${peso(left)} still owed.` : "All paid off!"}`, true);
+    // Recorded right away (no "are you sure?"); "undo" takes it back.
+    return {
+      reply: {
+        text: `${account.name} paid ${peso(amount)}${method !== "cash" ? ` via ${method === "gcash" ? "GCash" : "Maya"}` : ""}. ${left > 0 ? `${peso(left)} still owed.` : "All paid off!"}`,
+        execute: { kind: "payUtang", customer: account.name, amount, method },
+        undoable: true,
+      },
+      ctx,
+    };
   }
   if (!utangWord) return null;
 
@@ -1641,6 +1731,10 @@ function utangReply(raw: string, toks: string[], norm: string, world: World, ctx
   const tableId = explicitTable ?? (question ? null : contextTable(world, ctx));
   if (tableId !== null && !question) {
     const sp = extractSplit(rest);
+    // "utang table 2 Juan": a name left over once the table and utang words are gone.
+    const leftover = sp.rest.filter((w) => !NAME_STOP.has(w) && !/^\d/.test(w) && !["put", "on", "add", "charge", "ilista", "mo", "si", "ni", "kay", "under", "bill", "si"].includes(w));
+    const nameGuess = !cust && leftover.length >= 1 && leftover.length <= 3 && !parseItems(leftover, menuIndex(data)).lines.length ? titleName(leftover) : null;
+    if (!cust && nameGuess) return payReply(world, tableId, sp.split, undefined, rememberTable(ctx, tableId, world), "utang", nameGuess);
     if (!cust) {
       return askName(ctx, `Whose utang is ${tableName(data, tableId)}’s bill? Tell me the customer’s name.`, (name, w, c) => payReply(w, tableId, sp.split, undefined, c, "utang", name));
     }

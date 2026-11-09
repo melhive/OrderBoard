@@ -166,6 +166,12 @@ export const TOKEN_SYNONYMS: Record<string, string> = {
   paymaya: "maya", gcashed: "gcash",
   naserve: "served", "na-serve": "served", "nai-serve": "served", naiserve: "served", naihain: "served", nahain: "served", inihain: "served", hain: "served", ihain: "served",
   ubos: "soldout", naubos: "soldout", soldout: "soldout",
+  // Bisaya (Cebuano), for taking orders: numbers, "og/ug" (and), "naay" (with),
+  // "buok" (pieces), "dugang/dugangi" (add). Replies stay English/Taglish.
+  usa: "1", duha: "2", tulo: "3", upat: "4", unom: "6", napulo: "10",
+  og: "and", ug: "and", naay: "with", adunay: "with", buok: "piece", kanon: "rice",
+  dugang: "add", dugangi: "add", idugang: "add", dugangan: "add",
+  lamesa: "table",
 };
 
 /** Multi-word mishearings and Taglish phrases, applied on the normalized string. */
@@ -180,7 +186,14 @@ export const PHRASE_SYNONYMS: [RegExp, string][] = [
   [/\bpa-?order\b|\bpaorder\b|\bpa-?add\b/g, "order"],
   // Taglish verb forms: "mag-backup", "i-print", "nag-order", "mag-utang" → the English word.
   [/\b(?:mag|nag|pag|i|ipa|maka|naka|pinag)-(?=[a-z]{3,})/g, ""],
-  [/\bisa pa\b/g, "one more"],
+  // "usa pa ka pastil" = one more pastil (an item named); bare "isa pa" = one more of the last.
+  [/\b(?:isa|usa) pa ka\b/g, "1"],
+  [/\b(?:isa|usa) pa\b/g, "one more"],
+  // Bisaya: "isa ka pares", "duha ka mami" — drop the "ka" after a number
+  // (the mic often glues it on: "duhaka"). "kan-on" is rice.
+  [/\b(\d+|isa|usa|duha|tulo|upat|lima|unom|pito|walo|siyam|napulo)\s?ka\b/g, "$1"],
+  [/\bkan on\b|\bkan-on\b/g, "kanon"],
+  [/\bnga (?:naay|adunay|may)\b/g, "with"],
   // Filipino "at" means "and" between items; keep English "at table 3".
   [/\bat\b(?! (?:table|tbl|mesa|number|\d))/g, "and"],
   [/\bshu mai\b|\bsiu mai\b|\bsio mai\b|\bsho mai\b/g, "siomai"],

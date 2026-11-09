@@ -20,7 +20,7 @@ export function exportReport(format: "csv" | "pdf", spec: PeriodSpec) {
 export async function exportAllData() {
   const { data, showToast, noteBackup } = useApp.getState();
   const json = JSON.stringify(toBackup(data), null, 2);
-  await saveFile(`order_board_backup_${isoDate(new Date())}.json`, "application/json", json);
+  const { savedTo } = await saveFile(`order_board_backup_${isoDate(new Date())}.json`, "application/json", json);
   noteBackup();
-  showToast({ text: "Backup exported. Keep a copy off this phone.", tone: "success" });
+  showToast({ text: savedTo ? `Backup saved in ${savedTo}. Keep a copy off this phone too.` : "Backup exported. Keep a copy off this phone.", tone: "success" });
 }

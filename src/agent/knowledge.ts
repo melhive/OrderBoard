@@ -199,9 +199,38 @@ export const TOPICS: Topic[] = [
   {
     id: "voice",
     keys: ["voice", "talk", "talk mode", "mic", "microphone", "speak", "hands free", "salita", "magsalita", "boses"],
-    en: "Tap the mic in Ask to say one thing, or open Talk mode (the waveform button in Ask) for a hands-free conversation — I listen, answer out loud, and listen again. Voice needs internet on Android; typing always works offline.",
-    tl: "Pindutin ang mic sa Ask para magsalita, o buksan ang Talk mode para tuloy-tuloy na usapan — makikinig ako, sasagot, at makikinig ulit. Kailangan ng internet ang voice; ang pag-type ay gumagana kahit offline.",
+    en: "Tap the mic in Ask and just talk — when you pause, I send it by myself. Or open Talk mode (the waveform button in Ask) for a hands-free conversation: I listen, answer out loud, and keep listening; captions show what you said and what I'm saying. Voice may need internet unless your phone has Google's offline speech pack; typing always works offline.",
+    tl: "Pindutin ang mic sa Ask at magsalita — pag huminto ka, kusa ko itong ipapadala. O buksan ang Talk mode para tuloy-tuloy na usapan: makikinig ako, sasagot, at makikinig ulit; may caption ng sinabi mo at ng sagot ko. Puwedeng kailangan ng internet ang voice kung walang offline speech pack ang phone; ang pag-type ay gumagana kahit offline.",
     link: { label: "Start Talk mode", route: { name: "talk" } },
+  },
+  {
+    id: "talk",
+    keys: ["talk mode", "call mode", "hands free", "handsfree", "conversation", "usap", "kausap", "orb"],
+    en: "Talk mode is a hands-free conversation. Say orders like “4 pares table 4”, payments like “table 4 paid gcash”, fixes like “cancel pares” or “undo table 4” — I do it right away, show it on screen and say it back, then listen again. Tap the orb to pause or to interrupt me.",
+    tl: "Ang Talk mode ay tuloy-tuloy na usapan. Sabihin ang order (“4 pares table 4”), bayad (“table 4 paid gcash”), o pagtama (“cancel pares”, “undo table 4”) — gagawin ko agad, ipapakita at sasabihin, tapos makikinig ulit. I-tap ang orb para huminto o sumingit.",
+    link: { label: "Start Talk mode", route: { name: "talk" } },
+    try: ["4 pares table 4", "Table 4 paid gcash", "Undo table 4"],
+  },
+  {
+    id: "undo",
+    keys: ["undo", "mistake", "wrong", "mali", "ibalik", "bawiin", "take back", "revert", "cancel item", "cancel order"],
+    en: "Made a mistake? Say “undo” to take back my last change, or “undo table 4” to undo only Table 4’s last change — even a payment (the bill opens again). To take one item off, say “cancel pares” or “remove 1 mami table 2”. In the app, every change also shows an Undo button for a few seconds.",
+    tl: "Nagkamali? Sabihin ang “undo” para bawiin ang huling ginawa ko, o “undo table 4” para sa Table 4 lang — kahit bayad (bubuksan ulit ang bill). Para magtanggal ng isa, sabihin ang “cancel pares” o “remove 1 mami table 2”.",
+    try: ["Undo", "Undo table 4", "Cancel pares"],
+  },
+  {
+    id: "bisaya",
+    keys: ["bisaya", "cebuano", "binisaya", "visayan"],
+    en: "You can order in Bisaya: “isa ka pares with egg og duha ka mami”, “usa ka pastil ug softdrinks sa table 3”, “dugangi og usa ka mami”. I answer in English or Taglish.",
+    tl: "Puwedeng mag-order sa Bisaya: “isa ka pares with egg og duha ka mami”, “usa ka pastil ug softdrinks sa table 3”, “dugangi og usa ka mami”. Sasagot ako sa English o Taglish.",
+    try: ["Isa ka pares og duha ka mami table 1"],
+  },
+  {
+    id: "vibration",
+    keys: ["vibration", "vibrate", "haptic", "haptics", "buzz", "vibrate off"],
+    en: "Vibration on taps and payments can be turned on or off in Settings → Vibration.",
+    tl: "Puwedeng i-on o i-off ang vibration sa Settings → Vibration.",
+    link: { label: "Open Settings", route: { name: "settings" } },
   },
   {
     id: "offline",
@@ -218,9 +247,9 @@ export const TOPICS: Topic[] = [
   },
   {
     id: "install",
-    keys: ["install", "update", "home screen", "app icon", "new version", "icon"],
-    en: "In Chrome, open the menu ⋮ → “Install app” / “Add to Home screen”. Updates install by themselves: close and reopen the app to get the newest version. Don’t uninstall to update — uninstalling can delete your data.",
-    tl: "Sa Chrome, ⋮ → “Install app”. Kusang nag-a-update: isara at buksan ulit ang app. Huwag i-uninstall para mag-update — puwedeng mabura ang data.",
+    keys: ["install", "update", "home screen", "app icon", "new version", "icon", "apk"],
+    en: "Web version: in Chrome, open the menu ⋮ → “Install app”; it updates by itself when you close and reopen it. Android app (APK): to update, open the new APK and tap Update — it installs over the old one and keeps your data. Never uninstall to update — uninstalling deletes your data.",
+    tl: "Web version: sa Chrome, ⋮ → “Install app”; kusang nag-a-update. Android app (APK): buksan ang bagong APK at i-tap ang Update — hindi mabubura ang data. Huwag i-uninstall para mag-update — mabubura ang data.",
     link: { label: "What’s new", route: { name: "changelog" } },
   },
   {
@@ -269,6 +298,10 @@ export interface Chat {
   tl: string;
   /** Append a quick status line (sales so far, open tables). */
   status?: boolean;
+  /** What kind of small talk this was (the persona layer varies the wording). */
+  topic?: import("./types").ChatTopic;
+  /** The greeting/thanks was in Bisaya. */
+  bisaya?: boolean;
 }
 
 const JOKES: [string, string][] = [
@@ -281,52 +314,76 @@ export function smallTalk(norm: string, raw: string, hour: number): Chat | null 
   const short = t.split(" ").length <= 6;
   const greet = hour < 12 ? ["Good morning", "Magandang umaga"] : hour < 18 ? ["Good afternoon", "Magandang hapon"] : ["Good evening", "Magandang gabi"];
 
-  if (/^(hi|hello|hey|hiya|yo|uy|oy|oi|hoy|good (morning|afternoon|evening|night)|magandang (umaga|hapon|gabi)|kumusta|kamusta|musta|helo|halo)\b/.test(t) && short && !/\b(benta|sales|sold)\b/.test(t)) {
-    if (/\b(ka|kayo|you)\b/.test(t)) return { en: "I’m doing great, thanks for asking! Ready to take orders.", tl: "Ayos lang ako, salamat! Handa na akong tumanggap ng order.", status: true };
-    return { en: `${greet[0]}! I’m here.`, tl: `${greet[1]}! Nandito ako.`, status: true };
+  // Bisaya greetings and thanks.
+  if (/^(maayong (buntag|udto|hapon|gabii|adlaw)|maayo nga (buntag|hapon|gabii))\b/.test(t) && short) {
+    return { en: `${greet[0]}! I’m here.`, tl: `${greet[1]}! Nandito ako.`, status: true, topic: "greet", bisaya: true };
+  }
+  if (/^(salamat kaayo|daghang salamat|salamat sa imo)\b/.test(t) && short) {
+    return { en: "You’re welcome! Anything else?", tl: "Walang anuman! May iba pa ba?", topic: "thanks", bisaya: true };
+  }
+  if (/^(hi|hello|hey|hiya|yo|uy|oy|oi|hoy|good (morning|afternoon|evening|night)|magandang (umaga|hapon|gabi)|kumusta|kamusta|musta|helo|halo)\b/.test(t) && short && !/\b(benta|sales|sold)\b/.test(t) && !/^good night$/.test(t)) {
+    if (/\b(ka|kayo|you)\b/.test(t)) return { en: "I’m doing great, thanks for asking! Ready to take orders.", tl: "Ayos lang ako, salamat! Handa na akong tumanggap ng order.", status: true, topic: "howareyou" };
+    return { en: `${greet[0]}! I’m here.`, tl: `${greet[1]}! Nandito ako.`, status: true, topic: "greet" };
   }
   if (/\b(how are you|how r u|kumusta ka|kamusta ka|musta ka|how you doing)\b/.test(t)) {
-    return { en: "I’m doing great, thanks for asking! Ready to take orders.", tl: "Ayos lang ako, salamat sa pagtatanong! Handa na ako.", status: true };
+    return { en: "I’m doing great, thanks for asking! Ready to take orders.", tl: "Ayos lang ako, salamat sa pagtatanong! Handa na ako.", status: true, topic: "howareyou" };
   }
   if (/\b(thanks|thank you|salamat|ty|thx|tnx|maraming salamat|thank u)\b/.test(t) && short) {
-    return { en: "You’re welcome! Anything else?", tl: "Walang anuman! May iba pa ba?" };
+    return { en: "You’re welcome! Anything else?", tl: "Walang anuman! May iba pa ba?", topic: "thanks" };
   }
   if (/\b(good job|great job|nice one|galing|ang galing|astig|husay|well done|you are the best|the best ka|youre the best|good work)\b/.test(t)) {
-    return { en: "Thank you! Let’s keep the orders coming. 😊", tl: "Salamat! Tuloy-tuloy lang ang order. 😊" };
+    return { en: "Thank you! Let’s keep the orders coming. 😊", tl: "Salamat! Tuloy-tuloy lang ang order. 😊", topic: "praise" };
   }
   if (/\b(tired|pagod|inaantok|antok|sleepy|exhausted|hirap)\b/.test(t)) {
-    return { en: "You’re doing great — hang in there! Here’s how tonight is going:", tl: "Kaya mo ’yan! Konting tiis na lang. Eto ang lagay ngayong gabi:", status: true };
+    return { en: "You’re doing great — hang in there! Here’s how tonight is going:", tl: "Kaya mo ’yan! Konting tiis na lang. Eto ang lagay ngayong gabi:", status: true, topic: "tired" };
   }
   if (/\b(joke|biro|patawa|funny|tell me something)\b/.test(t)) {
     const j = JOKES[Math.floor((hour * 7 + t.length) % JOKES.length)]!;
-    return { en: j[0], tl: j[1] };
+    return { en: j[0], tl: j[1], topic: "joke" };
   }
   if (/\b(who made you|who built you|who created you|sino gumawa|sino ang gumawa|gumawa sayo)\b/.test(t)) {
-    return { en: "I was built into Order Board for this stall. I run entirely on this phone — no internet, no account.", tl: "Ginawa ako para sa Order Board ng stall na ito. Tumatakbo ako sa phone mismo — walang internet, walang account." };
+    return { en: "I was built into Order Board for this stall. I run entirely on this phone — no internet, no account.", tl: "Ginawa ako para sa Order Board ng stall na ito. Tumatakbo ako sa phone mismo — walang internet, walang account.", topic: "creator" };
   }
   if (/\b(are you there|you there|nandyan ka|nandiyan ka|andyan ka|gising ka)\b/.test(t)) {
-    return { en: "I’m here! What do you need?", tl: "Nandito ako! Ano’ng kailangan mo?" };
+    return { en: "I’m here! What do you need?", tl: "Nandito ako! Ano’ng kailangan mo?", topic: "ack" };
   }
   if (/^(bye|goodbye|good night|goodnight|see you|paalam|ingat|sige na|sige bye|tulog na)\b/.test(t) && short) {
-    return { en: "Good work tonight! Here’s where we ended up:", tl: "Salamat sa sipag ngayong gabi! Eto ang naging benta:", status: true };
+    return { en: "Good work tonight! Here’s where we ended up:", tl: "Salamat sa sipag ngayong gabi! Eto ang naging benta:", status: true, topic: "bye" };
   }
   if (/\b(i love you|love you|mahal kita|crush kita)\b/.test(t)) {
-    return { en: "Aww! I love a busy night of orders. 💛", tl: "Ay, kinikilig ako! Pero mas mahal ko ang maraming order. 💛" };
+    return { en: "Aww! I love a busy night of orders. 💛", tl: "Ay, kinikilig ako! Pero mas mahal ko ang maraming order. 💛", topic: "love" };
   }
   if (/\b(your name|ano pangalan mo|anong pangalan mo|who are you|what are you|sino ka|ano ka)\b/.test(t)) {
     return {
       en: "I’m Ask Agent, Order Board’s assistant. I take orders, manage bills, track utang and expenses, and answer questions about your sales — all on this phone.",
       tl: "Ako si Ask Agent, ang katulong ng Order Board. Kumukuha ako ng order, nag-aasikaso ng bill, utang at gastos, at sumasagot tungkol sa benta — dito lang sa phone.",
+      topic: "whoareyou",
     };
   }
   if (/^(sorry|pasensya|pasensiya|my bad|oops sorry)\b/.test(t) && short) {
-    return { en: "No worries at all!", tl: "Okay lang ’yan!" };
+    return { en: "No worries at all!", tl: "Okay lang ’yan!", topic: "sorry" };
   }
   if (/^(haha|hahaha|lol|hehe|hihi|xd)\b/.test(t) && short) {
-    return { en: "😄", tl: "😄" };
+    return { en: "😄", tl: "😄", topic: "laugh" };
   }
-  if (/^(nice|cool|great|awesome|ayos|sige|okay sige|noted|got it|gets|copy)$/.test(t)) {
-    return { en: "👍 Anything else?", tl: "👍 May iba pa ba?" };
+  if (/^(nice|cool|great|awesome|ayos|sige|okay sige|noted|got it|gets|copy|ok|okay|okey|oks|sige sige|alright|sure)$/.test(t)) {
+    return { en: "👍 Anything else?", tl: "👍 May iba pa ba?", topic: "ack" };
+  }
+  // Moods and everyday stall talk.
+  if (/\b(gutom|nagugutom|hungry|starving|kain tayo|kumain na|gigutom)\b/.test(t) && short) {
+    return { en: "Eat something first — I’ll hold the fort!", tl: "Kain ka muna — ako muna bahala dito!", topic: "hungry" };
+  }
+  if (/\b(dami ng tao|daming tao|dami tao|ang daming customer|ang dami ng customer|busy kami|busy tayo|so busy|very busy|rush|dagsa|puno)\b/.test(t) && !/\b(table|paid|bayad)\b/.test(t)) {
+    return { en: "Busy night — love it! Just call out the orders, I’ll keep up.", tl: "Dagsa ang tao — ayos! Sabihin mo lang ang order, ako na bahala.", status: true, topic: "busy" };
+  }
+  if (/\b(matumal|walang tao|walang customer|wala pang customer|tahimik|slow night|its slow|so slow|no customers|walay tao|hinay)\b/.test(t)) {
+    return { en: "Slow nights happen — the late crowd usually comes.", tl: "Matumal muna, pero darating din ang mga suki.", status: true, topic: "slow" };
+  }
+  if (/\b(bobo|tanga|stupid|useless|inutil|walang kwenta|walang silbi|dumb|idiot|engot|gago)\b/.test(t)) {
+    return { en: "Sorry about that — I’m still learning. Tell me again and I’ll do my best.", tl: "Pasensya na — nag-aaral pa ako. Ulitin mo lang, aayusin ko.", topic: "insult" };
+  }
+  if (/\b(bored|boring|nakakabagot|nakakainip|inip)\b/.test(t) && short) {
+    return { en: "Want a joke while we wait? Or I can tell you tonight’s numbers.", tl: "Gusto mo ng biro habang naghihintay? O sasabihin ko ang benta ngayong gabi.", topic: "bored" };
   }
   void raw;
   return null;

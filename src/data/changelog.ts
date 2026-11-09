@@ -1,7 +1,26 @@
 // Single source of truth for the app version shown in the UI.
 export const APP_VERSION = `v${__APP_VERSION__.split(".")[0]}`;
 
+/** Always the newest signed Android app (GitHub's "latest release" link; see .github/workflows/android.yml). */
+export const APP_DOWNLOAD_URL = "https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk";
+
 export const CHANGELOG: { version: string; changes: string[] }[] = [
+  { version: "v19", changes: [
+    "Order Board is now also a real Android app (APK): everything is built in, so it works offline from the first open",
+    "In the Android app, voice uses the phone’s own speech recognition — it can work without internet if the phone has Google’s offline speech pack — and replies are read aloud by the phone’s voice",
+    "Android app: backups and CSV reports are saved in Documents/Order Board and can be shared; PDF reports open Android’s print screen (choose “Save as PDF”)",
+    "Ask Agent takes orders in Bisaya too: “isa ka pares with egg og duha ka mami”, “usa ka pastil ug softdrinks sa table 3”, “dugangi og usa ka mami” (replies stay in English/Taglish)",
+    "Ask Agent talks more like a person: it says things differently every time, answers in your language, celebrates the first sale and milestones, notices when you pass yesterday’s sales, and remembers your name (“ako si …”)",
+    "More small talk: greetings (also in Bisaya), how it’s going tonight, tired, hungry, busy or slow nights, closing up with a summary, and jokes that don’t repeat",
+    "Talk mode is a real conversation now: a glowing AI orb listens and moves with your voice, pulses as it answers, and keeps listening — no need to tap again. Captions under the orb show what you said, what it said, and the bill it changed",
+    "Voice sends by itself when you pause — in the chat and in Talk mode",
+    "Payments happen right away, without a “Yes” step (say “table 4 paid gcash”); say “undo table 4” to take back only that table’s last change, even a payment",
+    "“Cancel pares” finds the table that has pares; “utang table 2 Juan” works; “add menu item kwek kwek 20” works",
+    "The assistant speaks a little slower, so it’s easier to follow",
+    "Live captions: what you say appears as you talk (in the chat box and in Talk mode), and in Talk mode the assistant’s reply lights up word by word as it’s read aloud",
+    "Smoother voice animations in Ask and Talk mode — no more tilted mic, flashing spinner or jumpy rings",
+    "Moving from the web version: use Settings → Export all data there, then use Import backup in the app",
+  ]},
   { version: "v18", changes: [
     "Talk mode — a hands-free voice conversation with Ask Agent: it listens, answers out loud and listens again; say “yes” or “oo” to confirm",
     "Ask Agent knows the whole app: ask “paano mag-backup?” or “how do I split a bill?” and get the answer with a button that takes you there",

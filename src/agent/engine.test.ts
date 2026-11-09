@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { freshData } from "../data/defaults";
 import { setPersistenceEnabled, useApp } from "../store/appStore";
-import { useAgent } from "./agentStore";
+import { setPersona, useAgent } from "./agentStore";
 
 setPersistenceEnabled(false);
+// These tests check the engine's exact wording; the persona layer has its own tests.
+setPersona(false);
 
 const app = () => useApp.getState();
 const say = (text: string) => useAgent.getState().send(text);
@@ -109,24 +111,25 @@ describe("orders", () => {
 });
 
 describe("payments", () => {
-  it("confirms before paying and computes change", () => {
+  it("pays right away (no confirmation) and computes change", () => {
     say("pares w/ egg and rice table 3");
     const r = say("table 3 paid 500 cash");
-    expect(r.confirm?.yes).toBe("Mark paid");
+    expect(r.confirm).toBeUndefined();
     expect(r.text).toContain("change ₱410");
-    expect(app().data.history).toHaveLength(0);
-    say("yes");
+    expect(r.card?.kind).toBe("bill");
     expect(app().data.history).toHaveLength(1);
     expect(app().data.history[0]!.total).toBe(90);
     expect(app().data.history[0]!.cash).toBe(500);
     expect(bill(3)).toEqual([]);
   });
 
-  it("can be cancelled", () => {
+  it("can be taken back with undo", () => {
     say("mami table 1");
     say("table 1 paid");
-    say("no");
+    expect(app().data.history).toHaveLength(1);
+    say("undo");
     expect(app().data.history).toHaveLength(0);
+    expect(bill(1)).toEqual(["1x Mami"]);
   });
 
   it("warns when cash is short", () => {
@@ -265,7 +268,8 @@ describe("Taglish and everyday phrasing", () => {
   it("treats 'bayad na' as a payment", () => {
     say("1 mami for table 2");
     const r = say("table 2 bayad na");
-    expect(r.confirm?.plan.kind).toBe("pay");
+    expect(r.execute?.kind).toBe("pay");
+    expect(app().data.history).toHaveLength(1);
   });
 
   it("answers sales questions in Taglish", () => {
@@ -279,7 +283,7 @@ describe("safety of follow-up questions", () => {
     say("1 pares for table 3");
     say("table 3 paid 200");
     expect(bill(2)).toEqual([]);
-    expect(bill(3)).toEqual(["1x Pares"]);
+    expect(app().data.history).toEqual([expect.objectContaining({ table: 3, total: 60, cash: 200 })]);
   });
 
   it("does not offer unknown words as custom items without an order", () => {
@@ -453,12 +457,10 @@ describe("several commands at once", () => {
     expect(bill(2)).toEqual(["2x Mami"]);
   });
 
-  it("confirms a batch that includes payments, and undo reverts all of it", () => {
+  it("pays several tables in one go, and undo reverts all of it", () => {
     say("pares table 1");
     say("mami table 2");
-    const r = say("table 1 paid and table 2 paid");
-    expect(r.confirm).toBeTruthy();
-    confirmLast();
+    say("table 1 paid and table 2 paid");
     expect(app().data.history).toHaveLength(2);
     say("undo");
     expect(app().data.history).toHaveLength(0);
@@ -483,7 +485,6 @@ describe("payment methods and utang", () => {
     say("2 pares table 1");
     const r = say("table 1 paid gcash");
     expect(r.text).toMatch(/via GCash/);
-    confirmLast();
     expect(app().data.history[0]).toMatchObject({ method: "gcash", total: 120 });
   });
 
@@ -491,15 +492,12 @@ describe("payment methods and utang", () => {
     say("2 pares table 2");
     const r = say("table 2 utang ni Ben");
     expect(r.text).toMatch(/Ben’s utang/);
-    confirmLast();
     expect(app().data.history[0]).toMatchObject({ method: "utang", customer: "Ben", total: 120 });
     expect(say("sino may utang?").text).toMatch(/owes you ₱120/);
     expect(say("magkano utang ni Ben").text).toMatch(/Ben owes ₱120/);
-    say("Ben paid 50");
-    confirmLast();
+    expect(say("Ben paid 50").text).toMatch(/Ben paid ₱50\. ₱70 still owed/);
     expect(app().data.history[0]!.payments).toEqual([expect.objectContaining({ amount: 50, method: "cash" })]);
     say("nagbayad si ben lahat gcash");
-    confirmLast();
     expect(say("who owes us").text).toMatch(/Nobody owes/);
   });
 
@@ -507,7 +505,6 @@ describe("payment methods and utang", () => {
     say("mami table 3");
     expect(say("table 3 utang").text).toMatch(/Whose utang/);
     say("Aling Nena");
-    confirmLast();
     expect(app().data.history[0]).toMatchObject({ customer: "Aling Nena" });
   });
 });
@@ -528,7 +525,6 @@ describe("sold out, notes, serving", () => {
   it("does not confuse 'sold' questions with sold out", () => {
     say("2 pares table 1");
     say("table 1 paid");
-    confirmLast();
     expect(say("how many pares sold today").text).toMatch(/2 sold/);
   });
 
@@ -559,7 +555,6 @@ describe("expenses, profit and tips", () => {
   it("records expenses and computes profit", () => {
     say("2 pares table 1");
     say("table 1 paid");
-    confirmLast();
     const r = say("gastos 50 sa yelo");
     expect(r.text).toMatch(/₱50 for Yelo/);
     expect(app().data.expenses).toHaveLength(1);
@@ -579,13 +574,137 @@ describe("expenses, profit and tips", () => {
 });
 
 describe("follow-up questions keep their confirmations", () => {
-  it("asks which table is paying, then the Yes button works", () => {
+  it("asks which table is paying, then pays it", () => {
     say("2 pares table 1");
     say("mami table 2");
     useAgent.getState().reset();
     expect(say("paid na").text).toMatch(/Which table is paying/);
-    expect(say("table 1").text).toMatch(/Mark Table 1 as paid/);
-    confirmLast();
+    expect(say("table 1").text).toMatch(/Table 1 paid — ₱120 recorded/);
     expect(app().data.history).toHaveLength(1);
+  });
+});
+
+// ---------------- Bisaya orders ----------------
+describe("Bisaya orders", () => {
+  const atTable = (id: number) => useApp.setState({ stack: [{ name: "tables" }, { name: "order", tableId: id }] });
+
+  it("takes the owner's examples on a table's order screen", () => {
+    atTable(3);
+    say("isa ka pares with egg og duha ka mami");
+    expect(bill(3)).toEqual(["1x Pares w/ Egg", "2x Mami"]);
+    say("Isa ka pastil og softdrinks");
+    expect(bill(3)).toEqual(["1x Pares w/ Egg", "2x Mami", "1x Pastil", "1x Softdrinks"]);
+  });
+
+  it("understands Bisaya numbers, ug/og and a spoken table", () => {
+    say("duha ka siomai ug usa ka coke para sa table 2");
+    expect(bill(2)).toEqual(["2x Siomai", "1x Softdrinks"]);
+    say("tulo ka mami nga naay itlog sa table 4");
+    expect(bill(4)).toEqual(["3x Mami w/ Egg"]);
+    say("upat ka pastil, unom ka siomai table 1");
+    expect(bill(1)).toEqual(["4x Pastil", "6x Siomai"]);
+  });
+
+  it("knows kan-on (rice), buok (pieces) and napulo", () => {
+    say("usa ka pares with egg ug kan-on table 1");
+    expect(bill(1)).toEqual(["1x Pares w/ Egg & Rice"]);
+    say("napulo ka buok siomai table 2");
+    expect(bill(2)).toEqual(["10x Siomai"]);
+  });
+
+  it("adds more with dugangi / usa pa", () => {
+    atTable(3);
+    say("duha ka mami");
+    say("dugangi og usa ka mami");
+    expect(bill(3)).toEqual(["3x Mami"]);
+    say("usa pa ka pastil");
+    expect(bill(3)).toEqual(["3x Mami", "1x Pastil"]);
+  });
+
+  it("copes with how the mic writes Bisaya", () => {
+    atTable(5);
+    say("isaka pares with egg og duhaka mami");
+    expect(bill(5)).toEqual(["1x Pares w/ Egg", "2x Mami"]);
+  });
+
+  it("doesn't change Tagalog or English orders", () => {
+    say("dalawang mami at isang pastil table 1");
+    expect(bill(1)).toEqual(["2x Mami", "1x Pastil"]);
+    say("one siomai and a coke for table 2");
+    expect(bill(2)).toEqual(["1x Siomai", "1x Softdrinks"]);
+  });
+});
+
+// ---------------- talk-mode helpers: undo per table, smart remove ----------------
+describe("undo per table and quick fixes", () => {
+  it("'undo table 4' undoes only Table 4's last change", () => {
+    say("4 pares table 4");
+    say("2 mami table 2");
+    say("1 siomai table 4");
+    say("1 coke table 2");
+    const r = say("undo table 4");
+    expect(r.text).toMatch(/Undid the items added on Table 4/);
+    expect(r.card?.kind).toBe("bill");
+    expect(bill(4)).toEqual(["4x Pares"]);
+    expect(bill(2)).toEqual(["2x Mami", "1x Softdrinks"]);
+    // A plain undo afterwards can't bring Table 4's change back.
+    say("undo");
+    expect(bill(2)).toEqual(["2x Mami"]);
+    expect(bill(4)).toEqual(["4x Pares"]);
+  });
+
+  it("'undo table 4' after a payment reopens the bill and removes the sale", () => {
+    say("2 pares table 4");
+    say("1 mami table 1");
+    say("table 4 paid using gcash");
+    say("table 1 paid");
+    expect(app().data.history).toHaveLength(2);
+    expect(say("undo table 4").text).toMatch(/Undid the payment on Table 4 — the bill is open again/);
+    expect(bill(4)).toEqual(["2x Pares"]);
+    expect(bill(1)).toEqual([]);
+    expect(app().data.history).toEqual([expect.objectContaining({ table: 1 })]);
+  });
+
+  it("says when there's nothing to undo on a table", () => {
+    say("1 mami table 1");
+    expect(say("undo table 3").text).toMatch(/nothing to undo on Table 3/);
+    expect(bill(1)).toEqual(["1x Mami"]);
+  });
+
+  it("'cancel pares' with no table removes it from the table that has it", () => {
+    say("4 pares table 4");
+    say("2 mami table 2");
+    expect(say("cancel pares").text).toMatch(/Removed Pares from Table 4/);
+    expect(bill(4)).toEqual([]);
+    expect(bill(2)).toEqual(["2x Mami"]);
+  });
+
+  it("asks which table when several have the item", () => {
+    say("1 pares table 1");
+    say("2 pares table 3");
+    say("2 mami table 2");
+    expect(say("cancel pares").text).toMatch(/Pares is on Table 1 and Table 3\. Which table/);
+    say("table 3");
+    expect(bill(3)).toEqual([]);
+    expect(bill(1)).toEqual(["1x Pares"]);
+  });
+
+  it("takes the utang name after the table", () => {
+    say("2 mami table 2");
+    expect(say("utang table 2 Juan").text).toMatch(/Juan’s utang/);
+    expect(app().data.history[0]).toMatchObject({ method: "utang", customer: "Juan" });
+  });
+
+  it("a waiting name question doesn't swallow a new command", () => {
+    say("2 mami table 2");
+    expect(say("table 2 utang").text).toMatch(/Whose utang/);
+    expect(say("split table 2").text).toMatch(/new bill on Table 2/);
+    expect(app().data.history).toHaveLength(0);
+  });
+
+  it("adds a menu item from 'add menu item kwek kwek 20'", () => {
+    expect(say("add menu item kwek kwek 20").text).toMatch(/Add Kwek Kwek \(₱20\) to the menu/);
+    confirmLast();
+    expect(app().data.menu.flatMap((c) => c.items).some((i) => i.name === "Kwek Kwek" && i.price === 20)).toBe(true);
   });
 });

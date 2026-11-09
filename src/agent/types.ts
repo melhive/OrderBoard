@@ -36,15 +36,36 @@ export type Plan =
   | { kind: "setHours"; start: string; end: string }
   | { kind: "export"; format: "csv" | "pdf" | "backup"; spec: PeriodSpec }
   | { kind: "moveTable"; from: number; to: number }
-  | { kind: "undo" };
+  | { kind: "setOwnerName"; name: string }
+  /** Undo the last change; with tableId, the last change on that table only. */
+  | { kind: "undo"; tableId?: number };
 
 export type Card =
   | { kind: "bill"; title: string; lines: Line[]; total: number; highlight?: string[]; note?: string; tableId?: number }
   | { kind: "stats"; title: string; stats: { label: string; value: string }[]; rows?: { label: string; value: string }[] }
   | { kind: "list"; title: string; rows: { label: string; value?: string; sub?: string }[] };
 
+/**
+ * What a reply is about, as plain facts. The persona layer (persona.ts) uses
+ * these to say it in a natural, varied way; the engine's own text stays the
+ * exact, canonical wording (and is what the tests check).
+ */
+export type ReplyMeta =
+  | { kind: "added"; table: string; items: string; units: number; total: number; tl: boolean }
+  | { kind: "removed"; table: string; items: string; total: number; tl: boolean }
+  | { kind: "paid"; table: string; total: number; method: "cash" | "gcash" | "maya"; change?: number; todayBefore: number; yesterday: number; ordersBefore: number; stillOpen: number; tl: boolean }
+  | { kind: "utang"; table: string; total: number; customer: string; tl: boolean }
+  | { kind: "chat"; topic: ChatTopic; tl: boolean; bisaya: boolean; name?: string }
+  | { kind: "unknown"; tl: boolean; tableName?: string; item?: string };
+
+export type ChatTopic =
+  | "greet" | "howareyou" | "thanks" | "praise" | "tired" | "joke" | "creator" | "bye" | "ack" | "laugh"
+  | "sorry" | "hungry" | "busy" | "slow" | "insult" | "whoareyou" | "love" | "bored" | "myname" | "whatsmyname" | "talkHello" | "other";
+
 export interface AgentReply {
   text: string;
+  /** Facts for the persona layer (varied, human wording). */
+  meta?: ReplyMeta;
   /** Shorter wording for text-to-speech; defaults to text. */
   speak?: string;
   card?: Card;
@@ -95,6 +116,8 @@ export interface World {
   currentTableId: number | null;
   activeSplit: number;
   now: Date;
+  /** The current message is in Taglish (set by respond for its helpers). */
+  tl?: boolean;
 }
 
 export type AgentInput = string | { type: "confirm" } | { type: "cancel" };

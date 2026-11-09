@@ -422,6 +422,7 @@ button.srow:active { background: var(--surface-2); }
 .sico.green { background: var(--green-soft); color: var(--green); }
 .sico.blue { background: var(--blue-soft); color: var(--blue); }
 .sico.purple { background: var(--purple-soft); color: var(--purple); }
+.srow.link-row { color: inherit; text-decoration: none; }
 .sico.gray { background: var(--surface-2); color: var(--text-2); }
 .smain { flex: 1; min-width: 0; }
 .smain b { display: block; font-size: 15px; font-weight: 600; }
@@ -559,12 +560,28 @@ button.srow:active { background: var(--surface-2); }
 .cbtn.send { background: var(--primary); color: #fff; }
 .cbtn.send:disabled { background: var(--surface-2); color: var(--text-3); }
 .cbtn.live { background: var(--primary); color: #fff; }
-.cbtn .ring { position: absolute; inset: 0; border-radius: 50%; background: var(--primary); }
-.listening { margin: 0 12px 10px; padding: 12px 12px 12px 18px; border-radius: 26px; background: var(--surface); border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent); display: flex; align-items: center; gap: 12px; min-height: 54px; }
+.cbtn .ring { position: absolute; inset: 0; border-radius: 50%; background: var(--primary); pointer-events: none; will-change: transform, opacity; animation: ripple 1.6s cubic-bezier(0.2, 0.6, 0.35, 1) infinite; }
+.listening { margin: 0 12px 10px; padding: 12px 12px 12px 18px; border-radius: 26px; background: var(--surface); border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent); display: flex; align-items: center; gap: 12px; min-height: 54px; animation: swap-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+/* Sound bars: full-height bars scaled with transform (no layout work per
+   frame), each a little out of step via negative delays so they never start
+   in sync or "pop". */
 .listening .wave { display: flex; align-items: center; gap: 3px; height: 22px; flex-shrink: 0; }
-.listening .wave i { width: 3px; border-radius: 2px; background: var(--primary); height: 6px; }
-.listening .ltext { flex: 1; min-width: 0; font-size: 15px; color: var(--text); }
+.listening .wave i { width: 3px; height: 20px; border-radius: 2px; background: var(--primary); transform: scaleY(0.3); will-change: transform; animation: bar 1.1s ease-in-out infinite; }
+.listening .wave i:nth-child(1) { animation-delay: -0.55s; }
+.listening .wave i:nth-child(2) { animation-delay: -0.2s; animation-duration: 0.95s; }
+.listening .wave i:nth-child(3) { animation-delay: -0.75s; animation-duration: 1.2s; }
+.listening .wave i:nth-child(4) { animation-delay: -0.35s; }
+.listening .wave i:nth-child(5) { animation-delay: -0.9s; animation-duration: 1s; }
+@keyframes bar { 0%, 100% { transform: scaleY(0.3); } 30% { transform: scaleY(1); } 60% { transform: scaleY(0.45); } 80% { transform: scaleY(0.8); } }
+@keyframes ripple { from { transform: scale(1); opacity: 0.4; } to { transform: scale(1.7); opacity: 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes swap-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* Live caption of what you're saying. Up to 3 lines; when it's longer the
+   newest words stay visible and the oldest fade out at the top. */
+.listening .ltext { flex: 1; min-width: 0; font-size: 15px; line-height: 1.35; color: var(--text); max-height: calc(1.35em * 3); overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; overflow-wrap: anywhere; }
+.listening .ltext.long { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em); mask-image: linear-gradient(to bottom, transparent 0, #000 1.2em); }
 .listening .ltext.placeholder { color: var(--text-3); }
+.listening .ltext .caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; border-radius: 1px; background: var(--primary); animation: caret 1s steps(1) infinite; }
 .voice-note { margin: 0 14px 8px; font-size: 12.5px; color: var(--gold); display: flex; gap: 6px; align-items: flex-start; line-height: 1.4; }
 .voice-note svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
 .jump { position: absolute; left: 50%; transform: translateX(-50%); z-index: 3; width: 40px; height: 40px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-2); display: flex; align-items: center; justify-content: center; color: var(--text); }
@@ -666,33 +683,43 @@ button.srow:active { background: var(--surface-2); }
 /* ---------- Talk mode ---------- */
 .talk {
   height: 100dvh; display: flex; flex-direction: column; color: var(--text);
-  background: radial-gradient(120% 70% at 50% 100%, color-mix(in srgb, var(--primary) 22%, var(--bg)) 0%, var(--bg) 62%);
+  background: radial-gradient(110% 55% at 50% 22%, color-mix(in srgb, var(--primary) 16%, var(--bg)) 0%, var(--bg) 70%);
 }
 .talk-top { display: flex; align-items: center; justify-content: space-between; padding: calc(8px + var(--safe-top)) 8px 8px; flex-shrink: 0; }
 .talk-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
 .talk-title svg { border-radius: 6px; }
 .talk-body { flex: 1; min-height: 0; display: flex; flex-direction: column; max-width: 560px; width: 100%; margin: 0 auto; padding: 0 20px calc(20px + var(--safe-bottom)); }
-.talk-captions { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; padding: 8px 0 16px; }
-.talk-heard { margin: 0; font-size: 16px; color: var(--text-2); font-style: italic; text-align: right; }
-.talk-answer { margin: 0; font-size: 22px; line-height: 1.4; font-weight: 600; letter-spacing: -0.01em; }
+/* Live captions under the orb: the conversation scrolls up like call captions,
+   newest at the bottom (kept in view by TalkScreen). */
+.talk-captions { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 8px 0 16px; overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px); mask-image: linear-gradient(to bottom, transparent 0, #000 40px); }
+.talk-captions { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px); mask-image: linear-gradient(to bottom, transparent 0, #000 24px); padding-top: 14px; }
+.tcap { margin: 0; line-height: 1.4; overflow-wrap: anywhere; transition: opacity 0.3s ease, color 0.3s ease; animation: swap-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tcap-agent { font-size: 17px; font-weight: 600; color: var(--text); opacity: 0.45; }
+.tcap-agent.latest { font-size: 22px; letter-spacing: -0.01em; opacity: 1; }
+.tcap-you { align-self: flex-end; max-width: 85%; text-align: right; font-size: 16px; color: var(--text-2); opacity: 0.55; padding: 8px 14px; border-radius: 18px 18px 4px 18px; background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.tcap-you.latest, .tcap-you.live { opacity: 1; }
+/* The finished sentence replaces the live caption in place: no second slide-in. */
+.tcap-you:not(.live) { animation: none; }
+.tcap-you.live { color: var(--text); font-size: 18px; border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent); }
+.tcap-you.live.waiting { min-width: 56px; text-align: center; }
+.tcap .caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 3px; vertical-align: -0.15em; border-radius: 1px; background: var(--primary); animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.tcap .tw { opacity: 0.32; transition: opacity 0.18s ease; }
+.tcap .tw.said { opacity: 1; }
 .talk-card .acard { margin-top: 0; }
 .talk-confirm { display: flex; gap: 10px; }
 .talk-confirm .btn { flex: 1; }
 .talk-error { margin: 0; font-size: 14px; color: var(--gold); }
-.talk-orb-wrap { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 44px; }
-.talk-orb { position: relative; width: 112px; height: 112px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-.talk-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--primary); pointer-events: none; }
-.talk-label { margin-top: 18px; }
-.talk-core {
-  position: relative; width: 100%; height: 100%; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff;
-  background: radial-gradient(circle at 35% 30%, #f6857a, var(--primary) 55%, var(--primary-strong));
-  box-shadow: 0 14px 40px color-mix(in srgb, var(--primary) 45%, transparent);
-}
-.talk-core svg { width: 40px; height: 40px; }
-.phase-paused .talk-core, .phase-error .talk-core { background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-2); }
-.talk-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; }
-.talk-label { font-size: 14px; font-weight: 600; color: var(--text-2); }
-.talk-hint { font-size: 13px; color: var(--text-3); min-height: 18px; }
+/* Orb stage: the orb in the middle, its status under it, captions below. */
+.talk-stage { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding-top: 6px; }
+.talk-orb { position: relative; display: block; border-radius: 50%; -webkit-tap-highlight-color: transparent; transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.talk-orb:active { transform: scale(0.96); }
+.talk-orb:focus-visible { outline: 2px solid var(--primary); outline-offset: -18%; }
+.ai-orb { display: block; }
+.talk-label { margin-top: -6px; min-height: 20px; font-size: 14px; font-weight: 600; color: var(--text-2); letter-spacing: 0.01em; transition: color 0.3s ease; }
+.phase-listening .talk-label, .phase-speaking .talk-label { color: var(--text); }
+.talk-hint { flex-shrink: 0; text-align: center; font-size: 13px; color: var(--text-3); min-height: 18px; padding-top: 8px; }
 
 /* ---------- boot ---------- */
 .boot { min-height: 100dvh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; color: var(--text-2); font-size: 14px; }
@@ -705,7 +732,8 @@ button.srow:active { background: var(--surface-2); }
   .capabilities { grid-template-columns: repeat(4, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  /* One near-instant run, not an endless flicker of infinite loops. */
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
 
 /* ---------- printable report ---------- */

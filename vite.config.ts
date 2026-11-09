@@ -11,6 +11,10 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  // Only scan the real entry for dependencies, and don't watch android/:
+  // `cap sync` copies the built app into android/app/src/main/assets/public.
+  optimizeDeps: { entries: ["index.html"] },
+  server: { watch: { ignored: ["**/android/**"] } },
   plugins: [
     react(),
     VitePWA({

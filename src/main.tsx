@@ -4,6 +4,7 @@ import { App } from "./App";
 import { loadAppData, loadChat, requestPersistentStorage, saveChat } from "./data/db";
 import { useAgent, type ChatMessage } from "./agent/agentStore";
 import { flushPersistence, useApp } from "./store/appStore";
+import { isNative } from "./platform/native";
 import "./styles.css";
 
 const rootEl = document.getElementById("root")!;
@@ -71,11 +72,15 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flushPersistence();
 });
 window.addEventListener("pagehide", flushPersistence);
+// Android app: Capacitor fires "pause" when the app goes to the background.
+document.addEventListener("pause", flushPersistence);
 
 void start();
 
-// Offline support + automatic updates (only when served over http(s), not in dev).
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+// Offline support + automatic updates (only when served over http(s), not in
+// dev, and not in the Android app, which already has every file built in and
+// updates by installing a new APK).
+if (import.meta.env.PROD && "serviceWorker" in navigator && !isNative()) {
   // registerType "autoUpdate": a new version activates and the page reloads
   // itself (pending saves are flushed by the pagehide handler above).
   void import("virtual:pwa-register").then(({ registerSW }) => {

@@ -11,11 +11,12 @@ import { App } from "./App";
 import { freshData } from "./data/defaults";
 import { LEGAL_VERSION } from "./legal/content";
 import { setPersistenceEnabled, useApp } from "./store/appStore";
-import { useAgent } from "./agent/agentStore";
+import { useAgent, setPersona } from "./agent/agentStore";
 import { quickCashOptions } from "./screens/OrderScreen";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 setPersistenceEnabled(false);
+setPersona(false);
 MotionGlobalConfig.skipAnimations = true;
 
 let root: Root;
@@ -329,6 +330,14 @@ describe("settings and menu", () => {
     expect(cat.cat).toBe("Desserts");
     expect(cat.items[0]).toMatchObject({ name: "Halo-halo", price: 70 });
   });
+
+  it("About links to the latest Android app", () => {
+    click(byLabel("Settings"));
+    click(button(/About Order Board/));
+    const link = [...document.querySelectorAll<HTMLAnchorElement>("a.srow")].find((a) => /Latest Android app/.test(a.textContent!))!;
+    expect(link.href).toBe("https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk");
+    expect(link.target).toBe("_blank");
+  });
 });
 
 describe("Android back button", () => {
@@ -370,14 +379,25 @@ describe("Ask Agent panel", () => {
     expect(useApp.getState().data.tables["2"]?.[0]?.items ?? []).toEqual([]);
   });
 
-  it("confirms a payment from a card button", () => {
+  it("records a payment right away, and its Undo button reopens the bill", () => {
     useApp.getState().addItem(1, "Pares", 60, 2, 0);
     click(byLabel("Ask Agent"));
     type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "table 1 paid 200");
     click(byLabel("Send"));
-    expect(useApp.getState().data.history).toHaveLength(0);
-    click(document.querySelector<HTMLButtonElement>(".mactions .btn-primary")!);
     expect(useApp.getState().data.history[0]).toMatchObject({ table: 1, total: 120, cash: 200 });
+    expect(text()).toContain("change ₱80");
+    click(button(/Undo/));
+    expect(useApp.getState().data.history).toHaveLength(0);
+    expect(useApp.getState().data.tables[1]![0]!.items).toEqual([expect.objectContaining({ name: "Pares", qty: 2 })]);
+  });
+
+  it("confirms a menu price change from a card button", () => {
+    click(byLabel("Ask Agent"));
+    type(byLabel("Message Ask Agent") as HTMLTextAreaElement, "change the price of mami to 55");
+    click(byLabel("Send"));
+    expect(useApp.getState().data.menu.flatMap((c) => c.items).find((i) => i.name === "Mami")!.price).toBe(50);
+    click(document.querySelector<HTMLButtonElement>(".mactions .btn-primary")!);
+    expect(useApp.getState().data.menu.flatMap((c) => c.items).find((i) => i.name === "Mami")!.price).toBe(55);
   });
 
   it("welcome cards send a message", () => {

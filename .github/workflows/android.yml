@@ -1,0 +1,149 @@
+name: Android APK
+
+# Builds the Capacitor Android app. No Android Studio needed: GitHub's
+# runners have Java and the Android SDK.
+# The runner image ships the Android SDK (ANDROID_HOME, licenses accepted);
+# Gradle downloads any missing platform itself.
+# - Every push/PR: builds the APK and attaches it to the run (Actions → run → Artifacts).
+# - Push to main: also publishes it as GitHub Release "vX.Y.Z" (marked Latest)
+#   with the file OrderBoard.apk, so this link always gives the newest version:
+#     https://github.com/melhive/OrderBoard/releases/latest/download/OrderBoard.apk
+#   Release notes = the newest entry of src/data/changelog.ts (scripts/release-notes.mjs).
+# - PR from this repo: replaces the "preview" pre-release with the new APK, so
+#   the latest test build is always a plain .apk (no zip) at
+#   releases/download/preview/OrderBoard-preview.apk
+# Signing: the release key comes from repository secrets
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS.
+# Without them (e.g. a PR from a fork) a debug APK is built instead.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: pnpm install --frozen-lockfile
+      - name: Build web app
+        run: pnpm build
+      - name: Copy web app into the Android project
+        run: pnpm exec cap sync android
+
+      - name: Signing key
+        id: key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/orderboard.p12"
+            echo "ORDERBOARD_KEYSTORE=$RUNNER_TEMP/orderboard.p12" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No signing key secrets: building a debug APK (can't update a release install)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Gradle (retries if the download server is busy)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          for i in 1 2 3 4 5; do
+            ./gradlew --no-daemon --version && exit 0
+            echo "::warning::Gradle download failed (try $i of 5), retrying in $((i * 20)) s"
+            sleep $((i * 20))
+          done
+          exit 1
+
+      - name: Build APK
+        working-directory: android
+        env:
+          ORDERBOARD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORDERBOARD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          if [ "${{ steps.key.outputs.signed }}" = "true" ]; then
+            ./gradlew --no-daemon assembleRelease
+          else
+            ./gradlew --no-daemon assembleDebug
+          fi
+
+      - name: Name the APK
+        id: apk
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ steps.key.outputs.signed }}" = "true" ]; then
+            SRC=android/app/build/outputs/apk/release/app-release.apk
+            NAME="OrderBoard-$VERSION.apk"
+          else
+            SRC=android/app/build/outputs/apk/debug/app-debug.apk
+            NAME="OrderBoard-$VERSION-debug.apk"
+          fi
+          mkdir -p out && cp "$SRC" "out/$NAME"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "out/$NAME" | head -3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: out/${{ steps.apk.outputs.name }}
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && steps.key.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.apk.outputs.version }}
+          NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          # Always the same file name, so this link gives the newest version:
+          #   https://github.com/<repo>/releases/latest/download/OrderBoard.apk
+          cp "out/$NAME" out/OrderBoard.apk
+          node scripts/release-notes.mjs "$GITHUB_REPOSITORY" OrderBoard.apk > notes.md
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            gh release upload "v$VERSION" out/OrderBoard.apk --clobber
+            gh release edit "v$VERSION" --notes-file notes.md --latest
+          else
+            gh release create "v$VERSION" out/OrderBoard.apk --target "$GITHUB_SHA" \
+              --title "Order Board $VERSION" --notes-file notes.md --latest
+          fi
+          echo "### Released v$VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download: https://github.com/$GITHUB_REPOSITORY/releases/latest/download/OrderBoard.apk" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish preview (test build from a PR)
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.key.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.apk.outputs.version }}
+          NAME: ${{ steps.apk.outputs.name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          cp "out/$NAME" out/OrderBoard-preview.apk
+          gh release delete preview --cleanup-tag --yes >/dev/null 2>&1 || true
+          gh release create preview out/OrderBoard-preview.apk --target "$HEAD_SHA" --prerelease --latest=false \
+            --title "Order Board preview (test build)" \
+            --notes "Test build of $PR_URL (v$VERSION, commit ${HEAD_SHA:0:7}). On the phone: download OrderBoard-preview.apk, open it and tap Install (or Update). Updating keeps your data — never uninstall to update."

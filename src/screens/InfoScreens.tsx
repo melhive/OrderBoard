@@ -1,9 +1,10 @@
 import { motion } from "motion/react";
 import { useApp, type LegalDoc } from "../store/appStore";
-import { APP_VERSION, CHANGELOG } from "../data/changelog";
+import { APP_DOWNLOAD_URL, APP_VERSION, CHANGELOG } from "../data/changelog";
 import { CONTACT_EMAIL, LEGAL_EFFECTIVE, LEGAL_VERSION, PRIVACY, PUBLISHER, TERMS } from "../legal/content";
 import { TopBar } from "../ui/components";
-import { IconCash, IconCheck, IconChevron, IconDoc, IconShield, IconSparkle, IconWifiOff, LogoMark } from "../ui/Icons";
+import { isNative } from "../platform/native";
+import { IconCash, IconCheck, IconChevron, IconDoc, IconDownload, IconShield, IconSparkle, IconWifiOff, LogoMark } from "../ui/Icons";
 
 export function ChangelogScreen() {
   return (
@@ -62,6 +63,21 @@ export function AboutScreen() {
         </div>
         <div className="card">
           <FeatureList />
+        </div>
+        <div className="section-title">Get the app</div>
+        <div className="group">
+          <a className="srow link-row" href={APP_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+            <span className="sico green"><IconDownload /></span>
+            <span className="smain">
+              <b>Latest Android app</b>
+              <span>
+                {isNative()
+                  ? "Download it and tap Install: it updates this app and keeps your data"
+                  : "Get Order Board as an Android app (bring your data with Export all data → Import backup)"}
+              </span>
+            </span>
+            <span className="strail"><IconChevron /></span>
+          </a>
         </div>
         <div className="section-title">Legal &amp; contact</div>
         <div className="group">

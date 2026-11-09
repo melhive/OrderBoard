@@ -260,7 +260,8 @@ export function AskScreen() {
   useEffect(
     () => () => {
       session.current?.abort();
-      stopSpeaking();
+      // Only the chat's own speech: Talk mode may already be greeting you.
+      stopSpeaking("ask");
     },
     [],
   );
@@ -282,7 +283,7 @@ export function AskScreen() {
     speak(reply.speak ?? reply.text, () => {
       // Hands-free: keep the conversation going while the chat is open.
       if (settings.handsFree && document.querySelector(".chat")) listen();
-    }, { tagalog: isTaglish(lastUserText.current) });
+    }, { tagalog: isTaglish(lastUserText.current), owner: "ask" });
   };
 
   const submit = (value: string, via: "voice" | "text" = "text") => {
@@ -301,7 +302,7 @@ export function AskScreen() {
       session.current.stop();
       return;
     }
-    stopSpeaking();
+    stopSpeaking("ask");
     setVoiceError(null);
     setPartial("");
     haptic.tap();
@@ -485,13 +486,20 @@ export function AskScreen() {
           {listening ? (
             <div className="listening" role="status">
               <span className="wave" aria-hidden>
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <motion.i key={i} animate={{ height: [6, 20, 8, 16, 6] }} transition={{ repeat: Infinity, duration: 1.1, delay: i * 0.12, ease: "easeInOut" }} />
-                ))}
+                <i />
+                <i />
+                <i />
+                <i />
+                <i />
               </span>
-              <span className={`ltext${partial ? "" : " placeholder"}`}>{partial || "Listening… say an order"}</span>
+              <span className={`ltext${partial ? "" : " placeholder"}${partial.length > 90 ? " long" : ""}`} aria-live="polite">
+                <span>
+                  {partial || "Listening… say an order"}
+                  {partial && <span className="caret" aria-hidden />}
+                </span>
+              </span>
               <button className="cbtn live" aria-label="Stop listening" onClick={listen}>
-                <motion.span className="ring" initial={{ scale: 1, opacity: 0.45 }} animate={{ scale: 1.7, opacity: 0 }} transition={{ repeat: Infinity, duration: 1.3 }} />
+                <span className="ring" aria-hidden />
                 <IconStop />
               </button>
             </div>
