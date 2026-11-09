@@ -65,6 +65,17 @@ jobs:
             echo "signed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Download Gradle (retries if the download server is busy)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          for i in 1 2 3 4 5; do
+            ./gradlew --no-daemon --version && exit 0
+            echo "::warning::Gradle download failed (try $i of 5), retrying in $((i * 20)) s"
+            sleep $((i * 20))
+          done
+          exit 1
+
       - name: Build APK
         working-directory: android
         env:
