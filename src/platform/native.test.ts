@@ -9,7 +9,7 @@ const impact = vi.fn(async () => {});
 const notification = vi.fn(async () => {});
 // Fake app-local "Speech" plugin: tests emit its events by hand. Hoisted
 // because voice.ts registers the plugin as soon as it's imported.
-type Ev = "partial" | "final" | "error" | "end";
+type Ev = "partial" | "final" | "error" | "end" | "level";
 const { speechListeners, speech, srStart, srPerm, srStop, srAbort, fakeSpeech } = vi.hoisted(() => {
   const speechListeners: Partial<Record<string, (d: { id: number; text?: string; error?: string }) => void>> = {};
   const speech = { id: 0 };
@@ -31,7 +31,7 @@ const { speechListeners, speech, srStart, srPerm, srStop, srAbort, fakeSpeech } 
   };
   return { speechListeners, speech, srStart, srPerm, srStop, srAbort, fakeSpeech };
 });
-const emit = (ev: Ev, d: { text?: string; error?: string } = {}) => speechListeners[ev]?.({ id: speech.id, ...d });
+const emit = (ev: Ev, d: { text?: string; error?: string; level?: number } = {}) => speechListeners[ev]?.({ id: speech.id, ...d });
 const started = () => vi.waitFor(() => expect(srStart).toHaveBeenCalled());
 
 vi.mock("./native", async (importOriginal) => ({ ...(await importOriginal<typeof import("./native")>()), isNative: () => true }));
@@ -124,6 +124,22 @@ describe("Android app adapters", () => {
     emit("end");
     expect(onFinal).toHaveBeenCalledWith("2 pares for table 3");
     expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends by itself when you pause, and passes on the mic level", async () => {
+    const onFinal = vi.fn();
+    const onLevel = vi.fn();
+    startListening({ onFinal, onLevel });
+    await started();
+    emit("level", { level: 0.6 });
+    expect(onLevel).toHaveBeenCalledWith(0.6);
+    emit("partial", { text: "4 pares table 4" });
+    expect(srStop).not.toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 1300)); // PAUSE_TO_SEND_MS of silence
+    expect(srStop).toHaveBeenCalledTimes(1);
+    emit("final", { text: "4 pares table 4" });
+    emit("end");
+    expect(onFinal).toHaveBeenCalledWith("4 pares table 4");
   });
 
   it("keeps what was heard if the recognizer errors after you stop", async () => {

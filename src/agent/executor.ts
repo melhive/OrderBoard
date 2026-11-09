@@ -2,19 +2,49 @@
 // checkpoint first, so "undo" (or the Undo button) reverts it exactly.
 
 import { currentRoute, useApp } from "../store/appStore";
-import type { Plan } from "./types";
+import { splitTotal } from "../lib/bill";
+import type { Card, Plan } from "./types";
 import { exportAllData, exportReport } from "../store/exports";
 
 export interface ExecResult {
   ok: boolean;
   /** Overrides the reply text (e.g. when undo had nothing to undo). */
   text?: string;
+  /** Overrides the reply card (e.g. the bill after "undo table 4"). */
+  card?: Card;
 }
+
+const UNDID: Record<string, string> = {
+  addItems: "the items added",
+  removeItems: "the removal",
+  setQty: "the quantity change",
+  pay: "the payment",
+  clear: "clearing the bill",
+  moveTable: "the move",
+  addSplit: "the new split bill",
+  setNote: "the note",
+  serve: "the served mark",
+  batch: "the last changes",
+};
 
 export function executePlan(plan: Plan): ExecResult {
   const app = useApp.getState();
   switch (plan.kind) {
     case "undo": {
+      if (plan.tableId !== undefined) {
+        const tid = plan.tableId;
+        const name = app.data.tableList.find((t) => t.id === tid)?.name;
+        const tname = name && /^\d+$/.test(name) ? `Table ${name}` : name ?? "that table";
+        const label = app.undoTable(tid);
+        if (!label) return { ok: false, text: `There’s nothing to undo on ${tname}.` };
+        const splits = useApp.getState().data.tables[tid] ?? [];
+        const lines = splits.flatMap((sp) => sp.items);
+        return {
+          ok: true,
+          text: label === "pay" ? `Undid the payment on ${tname} — the bill is open again.` : `Undid ${UNDID[label] ?? "the last change"} on ${tname}.`,
+          card: { kind: "bill", title: tname, lines, total: splits.reduce((t, sp) => t + splitTotal(sp), 0), tableId: tid },
+        };
+      }
       const label = app.undo();
       return label ? { ok: true, text: "Done — I undid the last change." } : { ok: false, text: "There’s nothing to undo." };
     }

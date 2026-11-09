@@ -682,18 +682,17 @@ button.srow:active { background: var(--surface-2); }
 /* ---------- Talk mode ---------- */
 .talk {
   height: 100dvh; display: flex; flex-direction: column; color: var(--text);
-  background: radial-gradient(120% 70% at 50% 100%, color-mix(in srgb, var(--primary) 22%, var(--bg)) 0%, var(--bg) 62%);
+  background: radial-gradient(110% 55% at 50% 22%, color-mix(in srgb, var(--primary) 16%, var(--bg)) 0%, var(--bg) 70%);
 }
 .talk-top { display: flex; align-items: center; justify-content: space-between; padding: calc(8px + var(--safe-top)) 8px 8px; flex-shrink: 0; }
 .talk-title { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
 .talk-title svg { border-radius: 6px; }
 .talk-body { flex: 1; min-height: 0; display: flex; flex-direction: column; max-width: 560px; width: 100%; margin: 0 auto; padding: 0 20px calc(20px + var(--safe-bottom)); }
-/* Live captions: the conversation scrolls up like call captions. The first
-   child's auto margin keeps short conversations at the bottom while still
-   letting long ones scroll (justify-content: flex-end would block that). */
+/* Live captions under the orb: the conversation scrolls up like call captions,
+   newest at the bottom (kept in view by TalkScreen). */
 .talk-captions { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 8px 0 16px; overscroll-behavior: contain;
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 40px); mask-image: linear-gradient(to bottom, transparent 0, #000 40px); }
-.talk-captions > :first-child { margin-top: auto; }
+.talk-captions { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 24px); mask-image: linear-gradient(to bottom, transparent 0, #000 24px); padding-top: 14px; }
 .tcap { margin: 0; line-height: 1.4; overflow-wrap: anywhere; transition: opacity 0.3s ease, color 0.3s ease; animation: swap-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .tcap-agent { font-size: 17px; font-weight: 600; color: var(--text); opacity: 0.45; }
 .tcap-agent.latest { font-size: 22px; letter-spacing: -0.01em; opacity: 1; }
@@ -711,41 +710,15 @@ button.srow:active { background: var(--surface-2); }
 .talk-confirm { display: flex; gap: 10px; }
 .talk-confirm .btn { flex: 1; }
 .talk-error { margin: 0; font-size: 14px; color: var(--gold); }
-.talk-orb-wrap { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 44px; }
-.talk-orb { position: relative; width: 112px; height: 112px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-/* Orb layers are always mounted; the phase class on .talk only fades them in
-   and out, so switching listening → thinking → speaking never jumps. */
-.talk-rings { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.45s ease; }
-.phase-listening .talk-rings { opacity: 1; }
-.talk-ring { position: absolute; inset: 0; border-radius: 50%; background: var(--primary); will-change: transform, opacity; animation: talk-ripple 2.4s cubic-bezier(0.2, 0.6, 0.35, 1) infinite; }
-.talk-ring:nth-child(2) { animation-delay: -0.8s; }
-.talk-ring:nth-child(3) { animation-delay: -1.6s; }
-@keyframes talk-ripple { from { transform: scale(1); opacity: 0.32; } to { transform: scale(1.6); opacity: 0; } }
-.talk-glow { position: absolute; inset: -14px; border-radius: 50%; pointer-events: none; background: radial-gradient(circle, color-mix(in srgb, var(--primary) 55%, transparent) 0%, transparent 70%); opacity: 0; transition: opacity 0.4s ease; will-change: transform, opacity; animation: talk-voice 0.8s ease-in-out infinite alternate; }
-.phase-speaking .talk-glow { opacity: 1; }
-@keyframes talk-voice { from { transform: scale(0.94); } to { transform: scale(1.1); } }
-.talk-label { margin-top: 18px; }
-.talk-core {
-  position: relative; width: 100%; height: 100%; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff;
-  background: radial-gradient(circle at 35% 30%, #f6857a, var(--primary) 55%, var(--primary-strong));
-  box-shadow: 0 14px 40px color-mix(in srgb, var(--primary) 45%, transparent);
-  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.3s ease, box-shadow 0.3s ease;
-}
-/* Paused/error: a grey layer fades over the red (gradients can't transition). */
-.talk-core::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--surface-3); box-shadow: var(--shadow-2); opacity: 0; transition: opacity 0.3s ease; }
-.phase-paused .talk-core, .phase-error .talk-core { color: var(--text); transform: scale(0.94); box-shadow: var(--shadow-2); }
-.phase-paused .talk-core::before, .phase-error .talk-core::before { opacity: 1; }
-.talk-orb:active .talk-core { transform: scale(0.92); }
-.talk-icon { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transition: opacity 0.2s ease, transform 0.25s ease; }
-.talk-icon svg { width: 40px; height: 40px; }
-.talk-icon-wait { opacity: 0; transform: scale(0.8); }
-/* "Thinking" usually lasts a few milliseconds; the delay stops the spinner
-   from flashing for a single frame. */
-.phase-thinking .talk-icon-wait { opacity: 1; transform: none; transition-delay: 0.15s; }
-.phase-thinking .talk-icon-mic { opacity: 0; transform: scale(0.8); transition-delay: 0.15s; }
-.talk-spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.35); border-top-color: #fff; animation: spin 0.9s linear infinite; }
-.talk-label { font-size: 14px; font-weight: 600; color: var(--text-2); }
-.talk-hint { font-size: 13px; color: var(--text-3); min-height: 18px; }
+/* Orb stage: the orb in the middle, its status under it, captions below. */
+.talk-stage { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; padding-top: 6px; }
+.talk-orb { position: relative; display: block; border-radius: 50%; -webkit-tap-highlight-color: transparent; transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.talk-orb:active { transform: scale(0.96); }
+.talk-orb:focus-visible { outline: 2px solid var(--primary); outline-offset: -18%; }
+.ai-orb { display: block; }
+.talk-label { margin-top: -6px; min-height: 20px; font-size: 14px; font-weight: 600; color: var(--text-2); letter-spacing: 0.01em; transition: color 0.3s ease; }
+.phase-listening .talk-label, .phase-speaking .talk-label { color: var(--text); }
+.talk-hint { flex-shrink: 0; text-align: center; font-size: 13px; color: var(--text-3); min-height: 18px; padding-top: 8px; }
 
 /* ---------- boot ---------- */
 .boot { min-height: 100dvh; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px; color: var(--text-2); font-size: 14px; }

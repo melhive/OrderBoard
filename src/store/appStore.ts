@@ -156,6 +156,8 @@ export interface AppState extends UIState {
   replaceData(data: AppData): void;
   checkpoint(label: string): void;
   undo(): string | null;
+  /** Undoes the most recent change that touched one table (its bill and its sales), leaving other tables alone. */
+  undoTable(tableId: number): string | null;
   /** Escape hatch for the agent executor and tests. */
   setData(fn: (d: AppData) => AppData): void;
 }
@@ -720,6 +722,35 @@ export const useApp = create<AppState>()((set, get) => {
       setData(() => last.data);
       set((s) => ({ activeSplit: Math.min(s.activeSplit, Math.max(0, (last.data.tables[(currentRoute(s) as { tableId?: number }).tableId ?? -1]?.length ?? 1) - 1)) }));
       return last.label;
+    },
+    undoTable(tableId) {
+      const stack = get().undoStack;
+      const cur = get().data;
+      const sig = (d: AppData) => JSON.stringify([d.tables[tableId] ?? [], d.history.filter((h) => h.table === tableId).map((h) => h.id)]);
+      let at = -1;
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const next = i + 1 < stack.length ? stack[i + 1]!.data : cur;
+        if (sig(stack[i]!.data) !== sig(next)) {
+          at = i;
+          break;
+        }
+      }
+      if (at < 0) return null;
+      const snap = stack[at]!.data;
+      const snapTxns = snap.history.filter((h) => h.table === tableId);
+      const snapIds = new Set(snapTxns.map((h) => h.id));
+      // Put this table back as it was in the snapshot: its bill, and its sales
+      // (a payment made since is removed; a sale restored since comes back).
+      const fix = (d: AppData): AppData => {
+        const kept = d.history.filter((h) => h.table !== tableId || snapIds.has(h.id));
+        const back = snapTxns.filter((h) => !kept.some((k) => k.id === h.id));
+        const history = back.length ? [...kept, ...back].sort((a, b) => a.ts.localeCompare(b.ts)) : kept;
+        return { ...d, tables: { ...d.tables, [String(tableId)]: snap.tables[tableId] ?? [] }, history };
+      };
+      // Later snapshots must agree, so a later plain "undo" can't bring the change back.
+      set({ undoStack: [...stack.slice(0, at), ...stack.slice(at + 1).map((e) => ({ ...e, data: fix(e.data) }))] });
+      setData(() => fix(cur));
+      return stack[at]!.label;
     },
     setData,
   };

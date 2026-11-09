@@ -53,10 +53,12 @@ export const useAgent = create<AgentState>()((set, get) => {
   const run = (input: AgentInput): AgentReply => {
     const { reply, ctx } = respond(input, worldSnapshot(), get().ctx);
     let text = reply.text;
+    let card = reply.card;
     let undo: ChatMessage["undo"];
     if (reply.execute) {
       const r = executePlan(reply.execute);
       if (r.text) text = r.text;
+      if (r.card) card = r.card;
       if (r.ok && reply.undoable) undo = "available";
     }
     // Only the newest confirmation stays actionable.
@@ -68,7 +70,7 @@ export const useAgent = create<AgentState>()((set, get) => {
       ts: Date.now(),
       role: "agent",
       text,
-      card: reply.card,
+      card,
       confirm: reply.confirm ? { yes: reply.confirm.yes, state: "pending" } : undefined,
       undo,
       suggestions: reply.suggestions,
@@ -76,7 +78,8 @@ export const useAgent = create<AgentState>()((set, get) => {
       link: reply.link,
     };
     set({ ctx, messages: [...messages, msg].slice(-MAX_MESSAGES) });
-    return { ...reply, text };
+    // A text override (e.g. undo) is also what gets spoken.
+    return { ...reply, text, card, speak: text !== reply.text ? undefined : reply.speak };
   };
 
   return {

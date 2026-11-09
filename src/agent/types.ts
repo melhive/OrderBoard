@@ -36,7 +36,8 @@ export type Plan =
   | { kind: "setHours"; start: string; end: string }
   | { kind: "export"; format: "csv" | "pdf" | "backup"; spec: PeriodSpec }
   | { kind: "moveTable"; from: number; to: number }
-  | { kind: "undo" };
+  /** Undo the last change; with tableId, the last change on that table only. */
+  | { kind: "undo"; tableId?: number };
 
 export type Card =
   | { kind: "bill"; title: string; lines: Line[]; total: number; highlight?: string[]; note?: string; tableId?: number }

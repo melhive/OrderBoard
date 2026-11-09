@@ -15,7 +15,7 @@ import { isNative, lazy } from "./native";
 
 const ttsPlugin = lazy(() => import("@capacitor-community/text-to-speech"));
 
-type SpeechEvent = { id: number; text?: string; error?: string };
+type SpeechEvent = { id: number; text?: string; error?: string; level?: number };
 interface SpeechPluginApi {
   available(): Promise<{ available: boolean }>;
   checkPermissions(): Promise<{ microphone: PermissionState }>;
@@ -23,7 +23,7 @@ interface SpeechPluginApi {
   start(o: { language: string; preferOffline?: boolean }): Promise<{ id: number }>;
   stop(): Promise<void>;
   abort(): Promise<void>;
-  addListener(event: "partial" | "final" | "error" | "end", cb: (d: SpeechEvent) => void): Promise<PluginListenerHandle>;
+  addListener(event: "partial" | "final" | "error" | "end" | "level", cb: (d: SpeechEvent) => void): Promise<PluginListenerHandle>;
 }
 /** The app-local Android plugin (never awaited or returned from a promise: it's a proxy). */
 const Speech = registerPlugin<SpeechPluginApi>("Speech");
@@ -61,6 +61,26 @@ export interface ListenHandlers {
   onFinal(text: string): void;
   onEnd?(): void;
   onError?(err: VoiceError): void;
+  /** Microphone loudness, 0–1, several times a second (Android app only). */
+  onLevel?(level: number): void;
+}
+
+/** After words were heard, this much silence ends the sentence and sends it. */
+export const PAUSE_TO_SEND_MS = 1200;
+
+/** Calls stop() once the speaker pauses: restarted by every new partial result. */
+function pauseWatcher(stop: () => void) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    heard() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(stop, PAUSE_TO_SEND_MS);
+    },
+    clear() {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+    },
+  };
 }
 
 export interface ListenSession {
@@ -83,8 +103,16 @@ export function startListening(h: ListenHandlers, langIndex = 0): ListenSession 
   rec.interimResults = true;
   rec.maxAlternatives = 1;
   let finalText = "";
+  let lastHeard = "";
   let delivered = false;
   let retried = false;
+  const pause = pauseWatcher(() => {
+    try {
+      rec.stop();
+    } catch {
+      /* already stopped */
+    }
+  });
   rec.onresult = (e) => {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -92,7 +120,9 @@ export function startListening(h: ListenHandlers, langIndex = 0): ListenSession 
       if (r.isFinal) finalText += r[0]!.transcript;
       else interim += r[0]!.transcript;
     }
-    h.onPartial?.((finalText + " " + interim).trim());
+    lastHeard = (finalText + " " + interim).trim();
+    h.onPartial?.(lastHeard);
+    if (lastHeard) pause.heard();
   };
   rec.onerror = (e) => {
     if (e.error === "language-not-supported" && langIndex + 1 < LANGS.length) {
@@ -104,26 +134,38 @@ export function startListening(h: ListenHandlers, langIndex = 0): ListenSession 
     if (e.error !== "aborted") h.onError?.(map[e.error] ?? "other");
   };
   rec.onend = () => {
+    pause.clear();
     if (retried) return;
-    if (!delivered && finalText.trim()) {
+    // Stopped after a pause: use what was heard even if it never became "final".
+    const text = (finalText.trim() || (aborted ? "" : lastHeard)).trim();
+    if (!delivered && text) {
       delivered = true;
-      h.onFinal(finalText.trim());
+      h.onFinal(text);
     }
     h.onEnd?.();
   };
+  let aborted = false;
   try {
     rec.start();
   } catch {
     h.onError?.("other");
     return null;
   }
-  return { stop: () => rec.stop(), abort: () => rec.abort() };
+  return {
+    stop: () => rec.stop(),
+    abort: () => {
+      aborted = true;
+      pause.clear();
+      rec.abort();
+    },
+  };
 }
 
 /** The session that native speech events are delivered to (one at a time). */
-let nativeActive: ((event: "partial" | "final" | "error" | "end", d: SpeechEvent) => void) | null = null;
+type NativeEv = "partial" | "final" | "error" | "end" | "level";
+let nativeActive: ((event: NativeEv, d: SpeechEvent) => void) | null = null;
 const nativeEvents = lazy(async () => {
-  for (const ev of ["partial", "final", "error", "end"] as const) await Speech.addListener(ev, (d) => nativeActive?.(ev, d));
+  for (const ev of ["partial", "final", "error", "end", "level"] as const) await Speech.addListener(ev, (d) => nativeActive?.(ev, d));
   return true;
 });
 
@@ -144,6 +186,7 @@ function startListeningNative(h: ListenHandlers, language = "en-PH"): ListenSess
   const finish = () => {
     if (finished) return;
     finished = true;
+    pause.clear();
     if (safety) clearTimeout(safety);
     if (nativeActive === onEvent) nativeActive = null;
     if (!cancelled) {
@@ -153,11 +196,13 @@ function startListeningNative(h: ListenHandlers, language = "en-PH"): ListenSess
     }
     h.onEnd?.();
   };
-  const onEvent = (event: "partial" | "final" | "error" | "end", d: SpeechEvent) => {
+  const onEvent = (event: NativeEv, d: SpeechEvent) => {
     if (finished || (sessionId !== undefined && d.id !== sessionId)) return;
-    if (event === "partial" && d.text) {
+    if (event === "level") h.onLevel?.(d.level ?? 0);
+    else if (event === "partial" && d.text) {
       heard = d.text;
       h.onPartial?.(d.text);
+      pause.heard();
     } else if (event === "final") finalText = d.text ?? "";
     else if (event === "error") {
       // en-PH missing on this phone (often offline): try English (US) once.
@@ -172,6 +217,12 @@ function startListeningNative(h: ListenHandlers, language = "en-PH"): ListenSess
     } else if (event === "end") finish();
   };
   let replace: ListenSession | null = null;
+  // Android usually ends by itself on silence; this makes sure it never waits long.
+  const stopNow = () => {
+    void Speech.stop().catch(() => {});
+    if (!safety) safety = setTimeout(finish, 2500);
+  };
+  const pause = pauseWatcher(stopNow);
   void (async () => {
     try {
       await nativeEvents();
@@ -197,9 +248,7 @@ function startListeningNative(h: ListenHandlers, language = "en-PH"): ListenSess
   return {
     stop: () => {
       if (replace) return replace.stop();
-      void Speech.stop().catch(() => {});
-      // Never hang if the recognizer doesn't report back.
-      if (!safety) safety = setTimeout(finish, 4000);
+      stopNow();
     },
     abort: () => {
       if (replace) return replace.abort();
@@ -259,7 +308,7 @@ export interface SpeakOptions {
 }
 
 /** Roughly how fast the phone voices talk at our rate, for the caption estimate. */
-const CHARS_PER_SEC = 15;
+const CHARS_PER_SEC = 13.5;
 
 /**
  * Reports speaking progress: the engine's own word events when it sends them,
@@ -316,7 +365,7 @@ export function speak(text: string, onEnd?: () => void, opts: SpeakOptions = {})
   const v = pickVoice(!!opts.tagalog);
   if (v) u.voice = v;
   u.lang = v?.lang ?? "en-US";
-  u.rate = 1.05;
+  u.rate = 0.95; // a touch slower than normal: easier to follow at a noisy stall
   const progress = progressTracker(said, opts.onProgress);
   let done = false;
   const finish = () => {
@@ -389,7 +438,8 @@ function speakNative(text: string, onEnd: (() => void) | undefined, opts: SpeakO
       if (done) return;
       nativeRange = onRange;
       progress.start();
-      await TextToSpeech.speak({ text: said, lang, rate: 1.0, queueStrategy: QueueStrategy.Flush });
+      // A touch slower than normal: easier to follow at a noisy stall.
+      await TextToSpeech.speak({ text: said, lang, rate: 0.9, queueStrategy: QueueStrategy.Flush });
     } catch {
       /* no TTS engine, or stopped */
     }

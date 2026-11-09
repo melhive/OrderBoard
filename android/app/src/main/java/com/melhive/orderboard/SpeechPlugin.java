@@ -24,6 +24,7 @@ import java.util.ArrayList;
  *   "final"   {text}  - the finished sentence
  *   "error"   {error} - no-speech | not-allowed | network | language | other
  *   "end"     {}      - always last, after "final" or "error"
+ *   "level"   {level} - microphone loudness 0..1, about 15 times a second
  * abort() drops the session silently; stop() ends it early and still
  * delivers "final". Events from an older session are never sent.
  * (src/platform/voice.ts is the only caller.)
@@ -64,6 +65,9 @@ public class SpeechPlugin extends Plugin {
                     intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
                     intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, getActivity().getPackageName());
                     if (preferOffline) intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+                    // Hints to end the sentence after a short pause (many recognizers honour them).
+                    intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1200L);
+                    intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L);
                     recognizer.startListening(intent);
                     JSObject r = new JSObject();
                     r.put("id", id);
@@ -132,6 +136,8 @@ public class SpeechPlugin extends Plugin {
     private class Listener implements RecognitionListener {
 
         private final int id;
+        private long lastLevelAt = 0;
+        private float smoothed = 0;
 
         Listener(int id) {
             this.id = id;
@@ -156,7 +162,17 @@ public class SpeechPlugin extends Plugin {
         public void onBeginningOfSpeech() {}
 
         @Override
-        public void onRmsChanged(float rmsdB) {}
+        public void onRmsChanged(float rmsdB) {
+            // rmsdB is roughly -2 (silence) to 10 (loud); send 0..1, throttled.
+            float v = Math.max(0f, Math.min(1f, (rmsdB + 2f) / 12f));
+            smoothed = smoothed * 0.5f + v * 0.5f;
+            long now = System.currentTimeMillis();
+            if (now - lastLevelAt < 66) return;
+            lastLevelAt = now;
+            JSObject d = new JSObject();
+            d.put("level", (double) smoothed);
+            send("level", d);
+        }
 
         @Override
         public void onBufferReceived(byte[] buffer) {}

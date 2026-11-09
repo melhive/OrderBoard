@@ -1,7 +1,10 @@
 // Talk mode — a hands-free voice conversation with Ask Agent.
 //
-// Loop: (greet) → listen → understand → speak the answer → listen again.
-// Tap the orb to interrupt or to start listening; say "yes"/"oo" to confirm.
+// Loop: (greet) → listen → understand → speak the answer → listen again, for
+// as long as the screen is open: silence just means it keeps listening (it
+// only pauses after a few quiet minutes, to save battery). A pause in speech
+// sends the sentence by itself. Tap the orb to pause, to resume, or to
+// interrupt the answer. Say "yes"/"oo" to confirm.
 // Everything said here is also kept in the chat history.
 // Captions: what you say appears live as you talk, and the assistant's reply
 // lights up word by word as it's read aloud.
@@ -11,7 +14,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../store/appStore";
 import { haptic } from "../platform/haptics";
 import { keepScreenOn, speak, speechInputSupported, speechOutputSupported, startListening, stopSpeaking, type ListenSession, type VoiceError } from "../platform/voice";
-import { IconCheck, IconKeyboard, IconMic, IconX, LogoMark } from "../ui/Icons";
+import { IconCheck, IconKeyboard, IconX, LogoMark } from "../ui/Icons";
+import { AiOrb } from "./AiOrb";
 import { useAgent, worldSnapshot } from "./agentStore";
 import { CardView } from "./AskScreen";
 import { insights, statusLine } from "./engine";
@@ -21,6 +25,8 @@ import type { AgentReply, Card } from "./types";
 type Phase = "starting" | "listening" | "thinking" | "speaking" | "paused" | "error";
 type Line = { id: number; who: "you" | "agent"; text: string };
 const MAX_LINES = 8;
+/** Stop listening after this long with nobody talking (saves battery). */
+const IDLE_LIMIT_MS = 3 * 60_000;
 
 /** The reply with the words already spoken lit up, the rest dimmed (no layout shift). */
 function SpokenText({ text, fraction }: { text: string; fraction: number }) {
@@ -51,7 +57,7 @@ const ERRORS: Record<VoiceError, string> = {
   other: "Voice stopped unexpectedly.",
 };
 
-const HINTS = ["“2 pares with egg for table 3”", "“Table 1 paid 500”", "“Sino may utang?”", "“Kumusta benta?”", "“Any tips?”", "“Served na table 2”"];
+const HINTS = ["“4 pares table 4”", "“Table 4 paid gcash”", "“Cancel pares”", "“Undo table 4”", "“Isa ka pastil og softdrinks”", "“Sino may utang?”", "“Kumusta benta?”", "“Served na table 2”"];
 
 /** What to say out loud for a reply. */
 function spoken(r: AgentReply): string {
@@ -81,8 +87,12 @@ export function TalkScreen() {
   const [hint, setHint] = useState(0);
   const session = useRef<ListenSession | null>(null);
   const alive = useRef(true);
-  const quietTries = useRef(0);
+  const failures = useRef(0);
+  const lastHeardAt = useRef(Date.now());
   const tagalog = useRef(false);
+  // Live values for the orb (read every animation frame, no re-render).
+  const level = useRef(0);
+  const pulse = useRef(0);
   const canListen = speechInputSupported();
   const canSpeak = speechOutputSupported();
 
@@ -94,31 +104,49 @@ export function TalkScreen() {
     setHeard("");
     setPhase("listening");
     let gotFinal = false;
+    let lastError: VoiceError | null = null;
+    const again = (ms: number) => setTimeout(() => alive.current && phaseRef.current === "listening" && listen(), ms);
     const s = startListening({
-      onPartial: (t) => setHeard(t),
+      onLevel: (v) => (level.current = v),
+      onPartial: (t) => {
+        setHeard(t);
+        lastHeardAt.current = Date.now();
+      },
       onFinal: (t) => {
         gotFinal = true;
-        quietTries.current = 0;
+        failures.current = 0;
+        lastHeardAt.current = Date.now();
         handle(t);
       },
       onError: (e) => {
-        if (!alive.current) return;
-        if (e === "no-speech") return; // handled in onEnd
-        setError(ERRORS[e]);
-        setPhase("error");
+        lastError = e;
       },
       onEnd: () => {
         session.current = null;
-        if (!alive.current || gotFinal) return;
-        if (phaseRef.current !== "listening") return;
-        // Nothing heard: try again quietly a couple of times, then wait for a tap.
-        if (quietTries.current < 2) {
-          quietTries.current++;
-          setTimeout(() => alive.current && phaseRef.current === "listening" && listen(), 250);
+        level.current = 0;
+        if (!alive.current || gotFinal || phaseRef.current !== "listening") return;
+        if (lastError === "not-allowed" || lastError === "unsupported") {
+          setError(ERRORS[lastError]);
+          setPhase("error");
           return;
         }
-        quietTries.current = 0;
-        setPhase("paused");
+        if (lastError === "network" || lastError === "other") {
+          // The recognizer can be briefly busy (e.g. right after speaking): retry, then give up politely.
+          failures.current++;
+          if (failures.current >= (lastError === "network" ? 3 : 6)) {
+            setError(ERRORS[lastError]);
+            setPhase("paused");
+            return;
+          }
+          again(lastError === "network" ? 1500 : 300 * failures.current);
+          return;
+        }
+        // Silence: keep listening — it's a conversation — but rest after a few quiet minutes.
+        if (Date.now() - lastHeardAt.current > IDLE_LIMIT_MS) {
+          setPhase("paused");
+          return;
+        }
+        again(120);
       },
     });
     session.current = s;
@@ -131,13 +159,22 @@ export function TalkScreen() {
       if (!alive.current) return;
       setPhase("speaking");
       setSpokenFraction(0);
+      let lastF = 0;
       const next = () => {
-        if (!alive.current) return;
+        if (!alive.current || phaseRef.current !== "speaking") return;
         setSpokenFraction(1);
-        if (then === "listen" && canListen) listen();
+        lastHeardAt.current = Date.now();
+        // A short gap so the microphone doesn't catch the end of the voice.
+        if (then === "listen" && canListen) setTimeout(() => alive.current && phaseRef.current === "speaking" && listen(), 250);
         else setPhase("paused");
       };
-      if (canSpeak) speak(text, next, { tagalog: tagalog.current, onProgress: (f) => alive.current && setSpokenFraction(f) });
+      const onProgress = (f: number) => {
+        if (!alive.current) return;
+        if (f > lastF + 0.001) pulse.current = 1; // each new word: a pulse on the orb
+        lastF = f;
+        setSpokenFraction(f);
+      };
+      if (canSpeak) speak(text, next, { tagalog: tagalog.current, onProgress });
       else setTimeout(next, 900);
     },
     [canListen, canSpeak, listen],
@@ -149,6 +186,7 @@ export function TalkScreen() {
     const last = [...useAgent.getState().messages].reverse().find((m) => m.role === "agent");
     setPendingId(last?.confirm?.state === "pending" ? last.id : null);
     if (r.tone === "warn" || r.tone === "error") haptic.warning();
+    else if (r.execute) haptic.success();
   };
 
   const handle = (text: string) => {
@@ -193,7 +231,7 @@ export function TalkScreen() {
       setError(ERRORS.unsupported);
       setPhase("error");
     } else say(greeting);
-    const hints = setInterval(() => setHint((h) => (h + 1) % HINTS.length), 3500);
+    const hints = setInterval(() => setHint((h) => (h + 1) % HINTS.length), 4000);
     return () => {
       alive.current = false;
       clearInterval(hints);
@@ -213,23 +251,31 @@ export function TalkScreen() {
   const tapOrb = () => {
     haptic.tap();
     if (phase === "speaking") {
+      // Interrupt the answer and listen.
       stopSpeaking();
+      setSpokenFraction(1);
       listen();
     } else if (phase === "listening") {
-      session.current?.stop();
-    } else if (phase !== "thinking") {
-      quietTries.current = 0;
+      // Pause the conversation.
+      session.current?.abort();
+      session.current = null;
+      level.current = 0;
+      setHeard("");
+      setPhase("paused");
+    } else if (phase !== "thinking" && canListen) {
+      failures.current = 0;
+      lastHeardAt.current = Date.now();
       listen();
     }
   };
 
   const label =
-    phase === "listening" ? (tagalog.current ? "Nakikinig…" : "Listening…") :
+    phase === "listening" ? (heard ? (tagalog.current ? "Naririnig kita…" : "Hearing you…") : tagalog.current ? "Nakikinig…" : "Listening…") :
     phase === "thinking" ? "Thinking…" :
-    phase === "speaking" ? "Speaking — tap to interrupt" :
+    phase === "speaking" ? "Speaking · tap to interrupt" :
     phase === "starting" ? "Starting…" :
     phase === "error" ? "Voice unavailable" :
-    "Tap to talk";
+    "Paused · tap the orb to talk";
 
   const { back, openAsk } = useApp.getState();
   return (
@@ -254,6 +300,15 @@ export function TalkScreen() {
       </header>
 
       <main className="talk-body">
+        <div className="talk-stage">
+          <button className="talk-orb" onClick={tapOrb} aria-label={label}>
+            <AiOrb state={phase} level={level} pulse={pulse} size={orbSize()} />
+          </button>
+          <div className="talk-label" aria-live="polite">
+            {label}
+          </div>
+        </div>
+
         <div className="talk-captions" ref={captionsRef} aria-live="polite">
           {lines.map((l, i) => {
             const latest = i === lines.length - 1;
@@ -263,8 +318,8 @@ export function TalkScreen() {
               </p>
             );
           })}
-          {phase === "listening" && (
-            <p className={`tcap tcap-you live${heard ? "" : " waiting"}`}>
+          {phase === "listening" && heard && (
+            <p className="tcap tcap-you live">
               {heard}
               <span className="caret" aria-hidden />
             </p>
@@ -287,35 +342,18 @@ export function TalkScreen() {
           {error && <p className="talk-error">{error}</p>}
         </div>
 
-        <div className="talk-orb-wrap">
-          {/* Pure CSS animations (transform/opacity only): they run on the
-              phone's compositor, so they stay smooth while speech is busy,
-              and nothing is re-created when the phase changes — layers just
-              fade in and out. */}
-          <button className="talk-orb" onClick={tapOrb} aria-label={label}>
-            <span className="talk-rings" aria-hidden>
-              <span className="talk-ring" />
-              <span className="talk-ring" />
-              <span className="talk-ring" />
-            </span>
-            <span className="talk-glow" aria-hidden />
-            <span className="talk-core">
-              <span className="talk-icon talk-icon-mic">
-                <IconMic />
-              </span>
-              <span className="talk-icon talk-icon-wait">
-                <span className="talk-spinner" />
-              </span>
-            </span>
-          </button>
-          <div className="talk-label">{label}</div>
-          <AnimatePresence mode="wait">
-            <motion.div key={hint} className="talk-hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              Try {HINTS[hint]}
-            </motion.div>
-          </AnimatePresence>
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div key={hint} className="talk-hint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            Try {HINTS[hint]}
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );
+}
+
+/** Orb size for this screen: big, but leaves room for the captions. */
+function orbSize(): number {
+  if (typeof window === "undefined") return 240;
+  return Math.round(Math.max(170, Math.min(280, window.innerWidth * 0.66, window.innerHeight * 0.32)));
 }
