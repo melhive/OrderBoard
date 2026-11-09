@@ -11,11 +11,12 @@ import { App } from "./App";
 import { freshData } from "./data/defaults";
 import { LEGAL_VERSION } from "./legal/content";
 import { setPersistenceEnabled, useApp } from "./store/appStore";
-import { useAgent } from "./agent/agentStore";
+import { useAgent, setPersona } from "./agent/agentStore";
 import { quickCashOptions } from "./screens/OrderScreen";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 setPersistenceEnabled(false);
+setPersona(false);
 MotionGlobalConfig.skipAnimations = true;
 
 let root: Root;

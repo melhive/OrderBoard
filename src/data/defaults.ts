@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   workStart: "18:00",
   workEnd: "02:00",
   haptics: true,
+  // ownerName is optional (unset until the owner says "ako si …").
   agent: { voiceReplies: true, confirmAdds: false, handsFree: false },
   acceptedLegalVersion: null,
   backupReminder: true,

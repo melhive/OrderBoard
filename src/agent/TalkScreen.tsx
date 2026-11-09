@@ -16,7 +16,7 @@ import { haptic } from "../platform/haptics";
 import { keepScreenOn, speak, speechInputSupported, speechOutputSupported, startListening, stopSpeaking, type ListenSession, type VoiceError } from "../platform/voice";
 import { IconCheck, IconKeyboard, IconX, LogoMark } from "../ui/Icons";
 import { AiOrb } from "./AiOrb";
-import { useAgent, worldSnapshot } from "./agentStore";
+import { personaLine, useAgent, worldSnapshot } from "./agentStore";
 import { CardView } from "./AskScreen";
 import { insights, statusLine } from "./engine";
 import { isTaglish } from "./knowledge";
@@ -225,7 +225,9 @@ export function TalkScreen() {
     tagalog.current = isTaglish(useAgent.getState().messages.filter((m) => m.role === "user").slice(-1)[0]?.text ?? "");
     const tip = insights(world)[0];
     const hello = tagalog.current ? "Nakikinig ako." : "I’m listening.";
-    const greeting = `${statusLine(world, tagalog.current)}${tip ? ` ${tip.text}` : ""} ${hello}`;
+    const plain = `${statusLine(world, tagalog.current)}${tip ? ` ${tip.text}` : ""} ${hello}`;
+    // A natural, varied hello (same facts as the plain status line).
+    const greeting = personaLine({ kind: "chat", topic: "greet", tl: tagalog.current, bisaya: false }, plain).replace(/\s*(Ready for orders\.|What’s first\?|Let’s get some orders in!|Handa na ako\.|Ano’ng una\?|Tara, kuha na tayo ng order!)$/, "") + `${tip ? ` ${tip.text}` : ""} ${hello}`;
     setLines([{ id: nextLine.current++, who: "agent", text: greeting }]);
     if (!canListen) {
       setError(ERRORS.unsupported);

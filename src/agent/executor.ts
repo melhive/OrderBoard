@@ -189,6 +189,9 @@ function apply(plan: Plan): ExecResult {
     case "setHours":
       app.updateSettings({ workStart: plan.start, workEnd: plan.end });
       return { ok: true };
+    case "setOwnerName":
+      app.updateSettings({ agent: { ...d.settings.agent, ownerName: plan.name } });
+      return { ok: true };
   }
 }
 

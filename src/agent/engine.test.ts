@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { freshData } from "../data/defaults";
 import { setPersistenceEnabled, useApp } from "../store/appStore";
-import { useAgent } from "./agentStore";
+import { setPersona, useAgent } from "./agentStore";
 
 setPersistenceEnabled(false);
+// These tests check the engine's exact wording; the persona layer has its own tests.
+setPersona(false);
 
 const app = () => useApp.getState();
 const say = (text: string) => useAgent.getState().send(text);

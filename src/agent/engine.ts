@@ -337,6 +337,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
   const data = world.data;
   const index = menuIndex(data);
   const tl = isTaglish(raw);
+  world = { ...world, tl };
 
   if (toks.length <= 3 && toks.every((t) => YES.has(t) || NO.has(t) || t === "po")) {
     return { reply: { text: "There’s nothing waiting for a yes or no right now. Tell me an order, or ask about a table or your sales.", suggestions: ["Which tables are open?", "Sales today"] }, ctx };
@@ -352,6 +353,30 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
   if (has(toks, "help", "commands", "examples") && toks.length <= 3 || hasPhrase(norm, "what can you do", "how to use", "what can i say", "what else can you do", "anong kaya mo", "what kaya mo")) {
     return { reply: helpReply(), ctx };
   }
+  // Names: "ako si Rommel", "my name is Rommel", "call me Kuya"; "ano pangalan ko?"
+  const intro = /^(?:ako si|ako ay si|my name is|my names|call me|tawagin mo akong|tawagin mo ako ng|tawagin mo kong|pangalan ko ay|pangalan ko|ang pangalan ko ay|im|i am)\s+([a-zñ][a-zñ'.-]*(?:\s+[a-zñ][a-zñ'.-]*)?)\s*(?:po|na lang|nalang)?$/.exec(norm);
+  if (intro && !(/^(?:im|i am)\b/.test(norm) && NOT_A_NAME.test(intro[1]!))) {
+    const name = intro[1]!.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    return {
+      reply: {
+        text: tl ? `Ikinagagalak kitang makilala, ${name}!` : `Nice to meet you, ${name}!`,
+        execute: { kind: "setOwnerName", name },
+        meta: { kind: "chat", topic: "myname", tl, bisaya: false, name },
+      },
+      ctx,
+    };
+  }
+  // (Tokens are normalized: "what's" → "what", "ano/anong" → "what".)
+  if (hasPhrase(norm, "what is my name", "what my name", "do you know my name", "know my name", "what pangalan ko", "sino ako", "kilala mo ba ako", "who am i", "unsa akong ngalan")) {
+    const n = data.settings.agent.ownerName;
+    return {
+      reply: {
+        text: n ? (tl ? `Ikaw si ${n}!` : `You’re ${n}!`) : tl ? "Hindi mo pa sinasabi — sabihin mo lang “ako si …”." : "You haven’t told me yet — just say “my name is …”.",
+        meta: { kind: "chat", topic: "whatsmyname", tl, bisaya: false, name: n },
+      },
+      ctx,
+    };
+  }
   const chat = smallTalk(norm, raw, world.now.getHours());
   if (chat) {
     let text = tl ? chat.tl : chat.en;
@@ -360,7 +385,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
       text += ` ${statusLine(world, tl)}${top ? ` ${top.text}` : ""}`;
       if (/^(hi|hello|hey|good|magandang|kumusta|kamusta|musta|uy|oy|yo)/.test(norm) && !tl) text = text.replace("I’m here.", "Ready to take orders.");
     }
-    return { reply: { text, suggestions: chat.status ? ["Which tables are open?", "Any tips?"] : undefined }, ctx };
+    return { reply: { text, suggestions: chat.status ? ["Which tables are open?", "Any tips?"] : undefined, meta: { kind: "chat", topic: chat.topic ?? "other", tl, bisaya: !!chat.bisaya, name: data.settings.agent.ownerName } }, ctx };
   }
   const topic = howTo(norm, raw);
   if (topic) {
@@ -675,6 +700,7 @@ export function respond(input: AgentInput, world: World, ctx: AgentContext, opts
       text: "Sorry, I didn’t understand that. Try an order like “2 mami and a water for table 1”, or a question like “how much did we sell today?”.",
       suggestions: ["What can you do?", "Which tables are open?", "Show the menu"],
       tone: "warn",
+      meta: { kind: "unknown", tl, tableName: explicitTable !== null ? tableName(data, explicitTable) : undefined },
     },
     ctx,
   };
@@ -775,7 +801,8 @@ function addReply(world: World, ctx: AgentContext, tableId: number, lines: Line[
   }
   if (unknown.length === 1 && unknown[0]!.split(" ").length <= 3) nextCtx = { ...nextCtx, pending: { kind: "needPrice", name: unknown[0]!, qty: unknownQty, tableId, split } };
   nextCtx = { ...nextCtx, lastAdd: { tableId, split, lines, at: world.now.getTime() } };
-  return { reply: { text, speak, execute: plan, undoable: true, card }, ctx: nextCtx };
+  const meta = unknown.length ? undefined : ({ kind: "added", table: name, items: linesText(lines), units: lines.reduce((u, l) => u + l.qty, 0), total: card.kind === "bill" ? card.total : 0, tl: !!world.tl } as const);
+  return { reply: { text, speak, execute: plan, undoable: true, card, meta }, ctx: nextCtx };
 }
 
 function removeReply(world: World, tableId: number, parsed: ParsedLine[], tokens: string[]): AgentReply {
@@ -796,7 +823,9 @@ function removeReply(world: World, tableId: number, parsed: ParsedLine[], tokens
   }
   if (!removals.length) return { text: `${name} doesn’t have ${missing.join(" or ")} on its bill.`, card: billCard(world, tableId, split), tone: "warn" };
   const desc = removals.map((r) => (r.qty === "all" ? r.name : `${r.qty}× ${r.name}`)).join(", ");
+  const after = billCard(world, tableId, split, [], removals);
   return {
+    meta: missing.length ? undefined : { kind: "removed", table: name, items: desc, total: after.kind === "bill" ? after.total : 0, tl: !!world.tl },
     text: `Removed ${desc} from ${name}.${missing.length ? ` (${missing.join(", ")} wasn’t on the bill.)` : ""}`,
     execute: { kind: "removeItems", tableId, split, items: removals },
     undoable: true,
@@ -843,6 +872,7 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
         text: `${name}${splitText} — ${peso(total)} added to ${customer}’s utang.${owes ? ` Total owed: ${peso(owes + total)}.` : ""}`,
         execute: { kind: "pay", tableId, splits: chosen, method, customer },
         undoable: true,
+        meta: { kind: "utang", table: name, total, customer, tl: !!world.tl },
         card: { kind: "bill", title: `${name}${splitText} · utang`, lines, total, note: `Utang · ${customer}`, tableId },
       },
       ctx,
@@ -863,6 +893,11 @@ function payReply(world: World, tableId: number, splitSel: number | "all" | null
       speak: `${name} paid${via}, ${pesoSpoken(total)}.${cash !== undefined ? ` Change ${pesoSpoken(cash - total)}.` : ""}`,
       execute: { kind: "pay", tableId, splits: chosen, cash, ...(method !== "cash" ? { method } : {}) },
       undoable: true,
+      meta: (() => {
+        const dt = dayTotals(world);
+        const stillOpen = openTables(data).filter((o) => o.t.id !== tableId || chosen.length < nonEmpty.length).length;
+        return { kind: "paid" as const, table: name, total, method: method === "utang" ? "cash" : method, change: cash !== undefined ? cash - total : undefined, todayBefore: dt.today, yesterday: dt.yesterday, ordersBefore: dt.orders, stillOpen, tl: !!world.tl };
+      })(),
       card: method !== "cash" ? ({ ...card, note: `Paid${via}` } as Card) : { ...card, note: card.note ?? "Paid · cash" },
     },
     ctx,
@@ -1313,6 +1348,18 @@ function helpReply(): AgentReply {
 // =====================================================================
 
 const DAY_MS = 24 * 3600e3;
+
+/** Sales today and yesterday (business days), for the persona's remarks. */
+function dayTotals(world: World): { today: number; orders: number; yesterday: number } {
+  const d = world.data;
+  const t = summarize(txnsForPeriod(d.history, todaySpec(), d.settings, world.now));
+  const y = addDays(businessDayKey(world.now, d.settings), -1);
+  const ys = summarize(txnsForPeriod(d.history, { period: "custom", from: y, to: y }, d.settings, world.now));
+  return { today: t.total, orders: t.orders, yesterday: ys.total };
+}
+
+/** "I'm tired", "I'm hungry" are not names. */
+const NOT_A_NAME = /^(?:tired|hungry|busy|bored|sleepy|sorry|here|back|done|ok|okay|fine|good|great|sad|happy|pagod|gutom|so|not|a|the|ready|going|leaving|closing|off)\b/;
 
 function todaySpec(): PeriodSpec {
   return { period: "today" };

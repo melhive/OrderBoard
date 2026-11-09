@@ -149,6 +149,7 @@ function cleanSettings(raw: Loose): Settings {
       voiceReplies: typeof agent.voiceReplies === "boolean" ? agent.voiceReplies : DEFAULT_SETTINGS.agent.voiceReplies,
       confirmAdds: typeof agent.confirmAdds === "boolean" ? agent.confirmAdds : DEFAULT_SETTINGS.agent.confirmAdds,
       handsFree: typeof agent.handsFree === "boolean" ? agent.handsFree : DEFAULT_SETTINGS.agent.handsFree,
+      ...(typeof agent.ownerName === "string" && agent.ownerName.trim() ? { ownerName: agent.ownerName.trim().slice(0, 40) } : {}),
     },
     acceptedLegalVersion: typeof s.acceptedLegalVersion === "string" ? s.acceptedLegalVersion : null,
     backupReminder: typeof s.backupReminder === "boolean" ? s.backupReminder : DEFAULT_SETTINGS.backupReminder,

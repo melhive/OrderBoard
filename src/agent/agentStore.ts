@@ -4,6 +4,31 @@ import { create } from "zustand";
 import { currentRoute, useApp } from "../store/appStore";
 import { respond } from "./engine";
 import { executePlan } from "./executor";
+import { freshPersonaMemory, humanize, personaFacts, type PersonaMemory, type Rng } from "./persona";
+import type { ReplyMeta } from "./types";
+
+// The persona layer (natural, varied wording). On in the app; tests that
+// check the engine's exact wording turn it off.
+let personaOn = true;
+let personaRng: Rng = Math.random;
+let personaMemory: PersonaMemory = freshPersonaMemory();
+/** A persona line outside a chat turn (e.g. Talk mode's greeting); falls back when the persona is off. */
+export function personaLine(meta: ReplyMeta, fallback: string): string {
+  if (!personaOn) return fallback;
+  try {
+    const h = humanize(meta, personaFacts(useApp.getState().data), personaMemory, personaRng);
+    personaMemory = h.memory;
+    return h.text;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setPersona(on: boolean, rng?: Rng) {
+  personaOn = on;
+  if (rng) personaRng = rng;
+  personaMemory = freshPersonaMemory();
+}
 import { emptyContext, type AgentContext, type AgentInput, type AgentReply, type Card, type World } from "./types";
 
 export interface ChatMessage {
@@ -55,11 +80,27 @@ export const useAgent = create<AgentState>()((set, get) => {
     let text = reply.text;
     let card = reply.card;
     let undo: ChatMessage["undo"];
+    let overridden = false;
     if (reply.execute) {
       const r = executePlan(reply.execute);
-      if (r.text) text = r.text;
+      if (r.text) {
+        text = r.text;
+        overridden = true;
+      }
       if (r.card) card = r.card;
       if (r.ok && reply.undoable) undo = "available";
+    }
+    // Say it like a person: same facts, varied wording.
+    let humanized = false;
+    if (personaOn && reply.meta && !overridden) {
+      try {
+        const h = humanize(reply.meta, personaFacts(useApp.getState().data), personaMemory, personaRng);
+        personaMemory = h.memory;
+        text = h.text;
+        humanized = true;
+      } catch {
+        /* keep the engine's wording */
+      }
     }
     // Only the newest confirmation stays actionable.
     const messages = get().messages.map((m) =>
@@ -79,7 +120,7 @@ export const useAgent = create<AgentState>()((set, get) => {
     };
     set({ ctx, messages: [...messages, msg].slice(-MAX_MESSAGES) });
     // A text override (e.g. undo) is also what gets spoken.
-    return { ...reply, text, card, speak: text !== reply.text ? undefined : reply.speak };
+    return { ...reply, text, card, speak: humanized || text !== reply.text ? undefined : reply.speak };
   };
 
   return {

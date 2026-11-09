@@ -7,6 +7,8 @@ export const CHANGELOG: { version: string; changes: string[] }[] = [
     "In the Android app, voice uses the phone’s own speech recognition — it can work without internet if the phone has Google’s offline speech pack — and replies are read aloud by the phone’s voice",
     "Android app: backups and CSV reports are saved in Documents/Order Board and can be shared; PDF reports open Android’s print screen (choose “Save as PDF”)",
     "Ask Agent takes orders in Bisaya too: “isa ka pares with egg og duha ka mami”, “usa ka pastil ug softdrinks sa table 3”, “dugangi og usa ka mami” (replies stay in English/Taglish)",
+    "Ask Agent talks more like a person: it says things differently every time, answers in your language, celebrates the first sale and milestones, notices when you pass yesterday’s sales, and remembers your name (“ako si …”)",
+    "More small talk: greetings (also in Bisaya), how it’s going tonight, tired, hungry, busy or slow nights, closing up with a summary, and jokes that don’t repeat",
     "Talk mode is a real conversation now: a glowing AI orb listens and moves with your voice, pulses as it answers, and keeps listening — no need to tap again. Captions under the orb show what you said, what it said, and the bill it changed",
     "Voice sends by itself when you pause — in the chat and in Talk mode",
     "Payments happen right away, without a “Yes” step (say “table 4 paid gcash”); say “undo table 4” to take back only that table’s last change, even a payment",

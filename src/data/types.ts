@@ -88,6 +88,8 @@ export interface AgentSettings {
   confirmAdds: boolean;
   /** Keep listening after each spoken reply (hands-free conversation). */
   handsFree: boolean;
+  /** What the assistant calls the owner ("ako si Rommel"); optional. */
+  ownerName?: string;
 }
 
 export interface Settings {
