@@ -60,7 +60,7 @@ export type ReplyMeta =
 
 export type ChatTopic =
   | "greet" | "howareyou" | "thanks" | "praise" | "tired" | "joke" | "creator" | "bye" | "ack" | "laugh"
-  | "sorry" | "hungry" | "busy" | "slow" | "insult" | "whoareyou" | "love" | "bored" | "myname" | "whatsmyname" | "other";
+  | "sorry" | "hungry" | "busy" | "slow" | "insult" | "whoareyou" | "love" | "bored" | "myname" | "whatsmyname" | "talkHello" | "other";
 
 export interface AgentReply {
   text: string;

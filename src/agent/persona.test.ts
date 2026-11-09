@@ -88,6 +88,23 @@ describe("persona: same facts, human wording", () => {
     expect(late.text).toMatch(/Magandang gabi/);
   });
 
+  it("opens Talk mode with a short hello — time of day, name, no numbers — that changes", () => {
+    let mem = freshPersonaMemory();
+    const rng = seeded(11);
+    const seen = new Set<string>();
+    for (let i = 0; i < 8; i++) {
+      const h = humanize({ kind: "chat", topic: "talkHello", tl: false, bisaya: false, name: "Rommel" }, facts({ hour: 20, todayTotal: 1115, todayOrders: 5 }), mem, rng);
+      mem = h.memory;
+      expect(h.text).toMatch(/Rommel/);
+      expect(h.text).not.toMatch(/₱|\d/);
+      expect(h.text.length).toBeLessThan(45);
+      seen.add(h.text);
+    }
+    expect(seen.size).toBeGreaterThan(3);
+    const tl = humanize({ kind: "chat", topic: "talkHello", tl: true, bisaya: false }, facts({ hour: 20 }), freshPersonaMemory(), seeded(12));
+    expect(tl.text).toMatch(/Ano|Nakikinig|Game|Uy|Hello/);
+  });
+
   it("reads the mood of the night when asked how it is", () => {
     const good = humanize({ kind: "chat", topic: "howareyou", tl: false, bisaya: false }, facts({ todayTotal: 3000, todayOrders: 20, yesterdayTotal: 2000 }), freshPersonaMemory(), seeded(6));
     expect(good.text).toMatch(/great|Fantastic/i);

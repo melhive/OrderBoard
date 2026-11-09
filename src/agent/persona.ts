@@ -233,6 +233,13 @@ function chat(v: Voice, topic: ChatTopic, tl: boolean, bisaya: boolean, f: Perso
       const end = tl ? v.pick("helloEndTl", ["Handa na ako.", "Ano’ng una?", "Tara, kuha na tayo ng order!"]) : v.pick("helloEnd", ["Ready for orders.", "What’s first?", "Let’s get some orders in!"]);
       return join(hello, back, statusPhrase(v, f, tl), end);
     }
+    case "talkHello": {
+      // Opening Talk mode: short and friendly, no numbers.
+      const g = greeting(f.hour, tl, bisaya);
+      return tl
+        ? v.pick("talkHelloTl", [`${g}${nm}! Ano’ng maitutulong ko?`, `Uy${nm}! Ano’ng order?`, `${g}${nm}! Nakikinig ako.`, `Hello${nm}! Ano’ng kailangan mo?`, `${g}${nm}! Game na ako.`])
+        : v.pick("talkHello", [`${g}${nm}! How can I help?`, `Hi${nm}! What can I do for you?`, `${g}${nm}! What’s the order?`, `Hey${nm}! I’m listening.`, `${g}${nm}! Ready when you are.`, `Hi${nm}! What do you need?`]);
+    }
     case "howareyou": {
       let mood: string;
       if (f.todayOrders && f.yesterdayTotal && f.todayTotal > f.yesterdayTotal) {
