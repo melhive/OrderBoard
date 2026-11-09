@@ -260,7 +260,8 @@ export function AskScreen() {
   useEffect(
     () => () => {
       session.current?.abort();
-      stopSpeaking();
+      // Only the chat's own speech: Talk mode may already be greeting you.
+      stopSpeaking("ask");
     },
     [],
   );
@@ -282,7 +283,7 @@ export function AskScreen() {
     speak(reply.speak ?? reply.text, () => {
       // Hands-free: keep the conversation going while the chat is open.
       if (settings.handsFree && document.querySelector(".chat")) listen();
-    }, { tagalog: isTaglish(lastUserText.current) });
+    }, { tagalog: isTaglish(lastUserText.current), owner: "ask" });
   };
 
   const submit = (value: string, via: "voice" | "text" = "text") => {
@@ -301,7 +302,7 @@ export function AskScreen() {
       session.current.stop();
       return;
     }
-    stopSpeaking();
+    stopSpeaking("ask");
     setVoiceError(null);
     setPartial("");
     haptic.tap();

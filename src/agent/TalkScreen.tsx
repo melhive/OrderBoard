@@ -97,7 +97,7 @@ export function TalkScreen() {
 
   const listen = useCallback(() => {
     if (!alive.current) return;
-    stopSpeaking();
+    stopSpeaking("talk");
     session.current?.abort();
     setError(null);
     setHeard("");
@@ -173,7 +173,7 @@ export function TalkScreen() {
         lastF = f;
         setSpokenFraction(f);
       };
-      if (canSpeak) speak(text, next, { tagalog: tagalog.current, onProgress });
+      if (canSpeak) speak(text, next, { tagalog: tagalog.current, onProgress, owner: "talk" });
       else setTimeout(next, 900);
     },
     [canListen, canSpeak, listen],
@@ -233,7 +233,7 @@ export function TalkScreen() {
       alive.current = false;
       clearInterval(hints);
       session.current?.abort();
-      stopSpeaking();
+      stopSpeaking("talk");
       release?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -249,7 +249,7 @@ export function TalkScreen() {
     haptic.tap();
     if (phase === "speaking") {
       // Interrupt the answer and listen.
-      stopSpeaking();
+      stopSpeaking("talk");
       setSpokenFraction(1);
       listen();
     } else if (phase === "listening") {

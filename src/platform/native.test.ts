@@ -46,7 +46,13 @@ vi.mock("@capacitor/haptics", () => ({
   ImpactStyle: { Light: "LIGHT" },
   NotificationType: { Success: "SUCCESS", Warning: "WARNING" },
 }));
-const tts = vi.hoisted(() => ({ range: null as null | ((i: { start: number; end: number }) => void), finish: null as null | (() => void) }));
+const tts = vi.hoisted(() => ({
+  range: null as null | ((i: { start: number; end: number }) => void),
+  finish: null as null | (() => void),
+  failNext: 0,
+  speakCalls: 0,
+  stopCalls: 0,
+}));
 vi.mock("@capacitor-community/text-to-speech", () => ({
   QueueStrategy: { Flush: 0 },
   TextToSpeech: {
@@ -55,8 +61,17 @@ vi.mock("@capacitor-community/text-to-speech", () => ({
       tts.range = cb;
       return { remove: async () => {} };
     },
-    speak: () => new Promise<void>((resolve) => (tts.finish = resolve)),
-    stop: async () => {},
+    speak: () => {
+      tts.speakCalls++;
+      if (tts.failNext > 0) {
+        tts.failNext--;
+        return Promise.reject(new Error("Not yet initialized or not available on this device."));
+      }
+      return new Promise<void>((resolve) => (tts.finish = resolve));
+    },
+    stop: async () => {
+      tts.stopCalls++;
+    },
   },
 }));
 vi.mock("@capacitor/core", async (importOriginal) => {
@@ -66,7 +81,7 @@ vi.mock("@capacitor/core", async (importOriginal) => {
 
 import { pickTextFile, saveFile } from "./files";
 import { haptic, setHapticsEnabled } from "./haptics";
-import { nativeVoiceError, speak, speechInputSupported, speechOutputSupported, startListening } from "./voice";
+import { nativeVoiceError, speak, speechInputSupported, speechOutputSupported, startListening, stopSpeaking } from "./voice";
 
 const fns = [writeFile, share, impact, notification, srStart, srPerm, srStop, srAbort];
 beforeEach(() => fns.forEach((f) => f.mockClear()));
@@ -220,6 +235,47 @@ describe("Android app adapters", () => {
     tts.finish!();
     await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
     expect(progress.at(-1)).toBe(1);
+  });
+
+  it("closing the chat doesn't silence Talk mode's greeting", async () => {
+    const onEnd = vi.fn();
+    tts.finish = null;
+    speak("Good evening! How can I help?", onEnd, { owner: "talk" });
+    await vi.waitFor(() => expect(tts.finish).not.toBeNull());
+    const before = tts.stopCalls;
+    stopSpeaking("ask"); // the chat screen's cleanup
+    await new Promise((r) => setTimeout(r, 10));
+    expect(tts.stopCalls).toBe(before);
+    stopSpeaking("talk"); // Talk mode's own interrupt still works
+    await vi.waitFor(() => expect(tts.stopCalls).toBe(before + 1));
+    tts.finish!();
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
+  });
+
+  it("waits for the voice engine to finish starting instead of staying silent", async () => {
+    tts.finish = null;
+    tts.failNext = 2; // "Not yet initialized" twice
+    const calls = tts.speakCalls;
+    const onEnd = vi.fn();
+    speak("Hi! What's the order?", onEnd, { owner: "talk" });
+    await vi.waitFor(() => expect(tts.finish).not.toBeNull(), { timeout: 3000 });
+    expect(tts.speakCalls - calls).toBe(3);
+    expect(onEnd).not.toHaveBeenCalled(); // still speaking
+    tts.finish!();
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
+  });
+
+  it("doesn't start talking after being interrupted while the voice engine starts", async () => {
+    tts.finish = null;
+    tts.failNext = 1;
+    const calls = tts.speakCalls;
+    const onEnd = vi.fn();
+    speak("Table 3, two pares.", onEnd, { owner: "talk" });
+    await vi.waitFor(() => expect(tts.speakCalls - calls).toBe(1));
+    stopSpeaking("talk"); // tapped the orb during the retry wait
+    await vi.waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1), { timeout: 3000 });
+    expect(tts.speakCalls - calls).toBe(1);
+    expect(tts.finish).toBeNull();
   });
 
   it("maps the recognizer's error messages", () => {

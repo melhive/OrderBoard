@@ -303,6 +303,8 @@ export function forSpeech(text: string): string {
 
 export interface SpeakOptions {
   tagalog?: boolean;
+  /** Which screen is speaking ("ask", "talk"): stopSpeaking(owner) only stops its own speech. */
+  owner?: string;
   /** How far through the reply the voice is, 0–1 (for live captions). */
   onProgress?: (fraction: number) => void;
 }
@@ -344,8 +346,27 @@ function progressTracker(said: string, onProgress?: (f: number) => void) {
   };
 }
 
+/** Who is speaking right now, so one screen closing can't cut off another's voice. */
+let speechOwner: string | null = null;
+let speechSeq = 0;
+/** Bumped by every stopSpeaking() that goes through, so a pending retry knows to give up. */
+let stopGen = 0;
+function claimSpeech(owner?: string): () => void {
+  const seq = ++speechSeq;
+  speechOwner = owner ?? null;
+  return () => {
+    if (speechSeq === seq) speechOwner = null;
+  };
+}
+
 export function speak(text: string, onEnd?: () => void, opts: SpeakOptions = {}) {
-  if (isNative()) return speakNative(text, onEnd, opts);
+  const release = claimSpeech(opts.owner);
+  const end = () => {
+    release();
+    onEnd?.();
+  };
+  if (isNative()) return speakNative(text, end, opts);
+  onEnd = end;
   if (!speechOutputSupported()) {
     opts.onProgress?.(1);
     onEnd?.();
@@ -389,7 +410,13 @@ export function speak(text: string, onEnd?: () => void, opts: SpeakOptions = {})
   setTimeout(finish, 2500 + said.length * 90);
 }
 
-export function stopSpeaking() {
+/**
+ * Stops speech. With an owner, only if that screen is the one speaking — e.g.
+ * the chat closing as Talk mode opens must not silence Talk's greeting.
+ */
+export function stopSpeaking(owner?: string) {
+  if (owner !== undefined && speechOwner !== null && speechOwner !== owner) return;
+  stopGen++;
   if (isNative()) {
     void ttsPlugin().then(({ TextToSpeech }) => TextToSpeech.stop()).catch(() => {});
     return;
@@ -430,16 +457,28 @@ function speakNative(text: string, onEnd: (() => void) | undefined, opts: SpeakO
     onEnd?.();
   };
   const onRange = (end: number) => progress.word(end);
+  const gen = stopGen;
+  const stopped = () => done || stopGen !== gen;
   void (async () => {
     try {
       const { TextToSpeech, QueueStrategy } = await ttsPlugin();
       const lang = opts.tagalog && (await nativeLangSupported("fil-PH")) ? "fil-PH" : (await nativeLangSupported("en-PH")) ? "en-PH" : "en-US";
       if (opts.onProgress) await nativeRangeEvents().catch(() => false);
-      if (done) return;
+      if (stopped()) return finish();
       nativeRange = onRange;
       progress.start();
-      // A touch slower than normal: easier to follow at a noisy stall.
-      await TextToSpeech.speak({ text: said, lang, rate: 0.9, queueStrategy: QueueStrategy.Flush });
+      // A touch slower than normal: easier to follow at a noisy stall. If the
+      // phone's voice engine is still starting up, wait and try again (up to ~2 s).
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await TextToSpeech.speak({ text: said, lang, rate: 0.9, queueStrategy: QueueStrategy.Flush });
+          break;
+        } catch (e) {
+          if (stopped() || attempt >= 5 || !/initiali[sz]ed|not available|unavailable/i.test(String((e as Error)?.message ?? e))) throw e;
+          await new Promise((r) => setTimeout(r, 400));
+          if (stopped()) throw e;
+        }
+      }
     } catch {
       /* no TTS engine, or stopped */
     }
