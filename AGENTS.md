@@ -89,7 +89,9 @@ src/screens/               Tables, Order, Summary, Utang, Settings, MenuEditor, 
 src/ui/                    components (TopBar, BottomNav, Switch, Segmented, Toast), Dialogs, Icons, hooks
 src/legal/content.ts       Privacy Policy + Terms text, LEGAL_VERSION
 legacy/                    v15 single-file app (reference only)
-README.md                  GitHub front page: download link, highlights (keep it user-facing)
+README.md                  GitHub front page: highlights, download link, docs, layout, status, releases (keep it user-facing)
+DEVELOPMENT_STATUS.md      versions, test results, what's verified on a phone, open items (update with each release)
+docs/                      ASK_AGENT.md (what you can say), BUILDING.md (install, releases, signing, local dev)
 scripts/release-notes.mjs  release notes for the APK release (from the newest CHANGELOG entry)
 ```
 
